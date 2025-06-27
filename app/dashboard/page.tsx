@@ -467,15 +467,21 @@ const DashboardPage: React.FC = () => {
     const ipdCash = ipdAppointments.reduce(
       (sum, a) =>
         sum +
-        a.payments.filter((p) => p.paymentType === "cash" && p.type === "advance").reduce((s, p) => s + p.amount, 0),
+        a.payments
+          .filter((p) => p.paymentType === "cash" && p.type === "advance")
+          .reduce((s, p) => s + Number(p.amount), 0),
       0,
     )
+    
     const ipdOnline = ipdAppointments.reduce(
       (sum, a) =>
         sum +
-        a.payments.filter((p) => p.paymentType === "online" && p.type === "advance").reduce((s, p) => s + p.amount, 0),
+        a.payments
+          .filter((p) => p.paymentType === "online" && p.type === "advance")
+          .reduce((s, p) => s + Number(p.amount), 0), // <--- use Number()
       0,
     )
+    
     return {
       totalOpdCount: opdAppointments.length,
       totalOpdAmount: totalOpdAmt,
@@ -857,7 +863,7 @@ const DashboardPage: React.FC = () => {
                   <Activity className="text-white h-6 w-6" />
                 </div>
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-sky-600 to-blue-600 bg-clip-text text-transparent">
-                  MEDFORD HOSPITAL
+                 G-MEDFORD NX HOSPITAL
                 </h1>
               </div>
               <div className="relative w-full md:w-1/3">
