@@ -30,7 +30,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import logo from "./logo.png";
+import logo from "./logo.jpg";
 
 // Define the structure for navigation items
 type NavItemProps = {
