@@ -33,5 +33,5 @@ export async function generateNextUHID(): Promise<string> {
   }
 
   const formattedCounter = String(nextCounter).padStart(5, "0")
-  return `GMH-${yy}${mm}${dd}-${formattedCounter}`
+  return `MF-${yy}${mm}${dd}-${formattedCounter}`
 }
