@@ -962,7 +962,7 @@ export default function BillingPage() {
             </button>
 
             <div className="flex items-center space-x-4">
-              {selectedRecord && (
+              {selectedRecord && !selectedRecord.dischargeDate && (
                 <button
                   onClick={handleDischarge}
                   disabled={loading}
@@ -1088,7 +1088,7 @@ export default function BillingPage() {
                         )}
                       </div>
 
-                      {/* Discount can be updated even after discharge */}
+                      {/* Discount Quick Action Button */}
                       <button
                         onClick={() => setIsDiscountModalOpen(true)}
                         className="mt-4 w-full flex items-center justify-center px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg transition-colors shadow-sm"
@@ -1162,7 +1162,6 @@ export default function BillingPage() {
                           </button>
                         </InvoiceDownload>
 
-                        {/* Payments can be added even after discharge */}
                         <button
                           onClick={() => setActiveTab("payments")}
                           className="w-full flex items-center justify-center px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
@@ -1393,7 +1392,7 @@ export default function BillingPage() {
                                       {srv.createdAt ? new Date(srv.createdAt).toLocaleString() : "N/A"}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-center">
-                                      {/* Allow deleting services after discharge */}
+                                      {/* Removed dischargeDate condition */}
                                       <button
                                         onClick={() => handleDeleteServiceItem(srv)}
                                         className="text-red-500 hover:text-red-700 transition-colors"
@@ -1419,7 +1418,8 @@ export default function BillingPage() {
                         )}
                       </div>
 
-                      {/* Allow adding services after discharge */}
+                      {/* Add Service Form (with manual typing or selection) */}
+                      {/* Removed dischargeDate condition */}
                       <div className="lg:col-span-1">
                         <div className="bg-white rounded-lg border border-gray-200 p-6">
                           <h3 className="text-lg font-semibold text-gray-800 mb-4">Add Hospital Service</h3>
@@ -1433,8 +1433,7 @@ export default function BillingPage() {
                                 render={({ field }) => {
                                   // If the typed-in service is not in the array, create an object so CreatableSelect won't complain
                                   const selectedOption = serviceOptions.find(
-                                    (option) =>
-                                      (option.label || "").toLowerCase() === (field.value || "").toLowerCase(),
+                                    (option) => option.label.toLowerCase() === field.value.toLowerCase(),
                                   ) || {
                                     label: field.value,
                                     value: field.value,
@@ -1659,7 +1658,7 @@ export default function BillingPage() {
                                       {new Date(payment.date).toLocaleString()}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-center">
-                                      {/* Allow deleting payments after discharge */}
+                                      {/* Removed dischargeDate condition */}
                                       <button
                                         onClick={() =>
                                           payment.id && handleDeletePayment(payment.id, payment.amount, payment.type)
@@ -1678,7 +1677,8 @@ export default function BillingPage() {
                         )}
                       </div>
 
-                      {/* Allow adding payments after discharge */}
+                      {/* Add Payment Form */}
+                      {/* Removed dischargeDate condition */}
                       <div className="lg:col-span-1">
                         <div className="bg-white rounded-lg border border-gray-200 p-6">
                           <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
@@ -1818,7 +1818,7 @@ export default function BillingPage() {
                                       {agg.lastVisit ? agg.lastVisit.toLocaleString() : "N/A"}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-center">
-                                      {/* Allow deleting consultant charges after discharge */}
+                                      {/* Removed dischargeDate condition */}
                                       <button
                                         onClick={() => handleDeleteConsultantCharges(agg.doctorName)}
                                         className="text-red-500 hover:text-red-700 transition-colors"
@@ -1845,7 +1845,8 @@ export default function BillingPage() {
                         )}
                       </div>
 
-                      {/* Allow adding consultant charges after discharge */}
+                      {/* Enhanced Add Consultant Charge Form */}
+                      {/* Removed dischargeDate condition */}
                       <div className="lg:col-span-1">
                         <div className="bg-white rounded-lg border border-gray-200 p-6">
                           <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
@@ -2070,7 +2071,7 @@ export default function BillingPage() {
                               {new Date(payment.date).toLocaleString()}
                             </td>
                             <td className="px-4 py-3 text-sm text-center">
-                              {/* Allow deleting payments from history modal after discharge */}
+                              {/* Removed dischargeDate condition */}
                               <button
                                 onClick={() =>
                                   payment.id && handleDeletePayment(payment.id, payment.amount, payment.type)
