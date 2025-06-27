@@ -962,7 +962,7 @@ export default function BillingPage() {
             </button>
 
             <div className="flex items-center space-x-4">
-              {selectedRecord && !selectedRecord.dischargeDate && (
+              {selectedRecord && (
                 <button
                   onClick={handleDischarge}
                   disabled={loading}
@@ -1088,16 +1088,14 @@ export default function BillingPage() {
                         )}
                       </div>
 
-                      {/* Discount Quick Action Button */}
-                      {!selectedRecord.dischargeDate && (
-                        <button
-                          onClick={() => setIsDiscountModalOpen(true)}
-                          className="mt-4 w-full flex items-center justify-center px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg transition-colors shadow-sm"
-                        >
-                          <Percent size={16} className="mr-2" />
-                          {discountVal > 0 ? "Update Discount" : "Add Discount"}
-                        </button>
-                      )}
+                      {/* Discount can be updated even after discharge */}
+                      <button
+                        onClick={() => setIsDiscountModalOpen(true)}
+                        className="mt-4 w-full flex items-center justify-center px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg transition-colors shadow-sm"
+                      >
+                        <Percent size={16} className="mr-2" />
+                        {discountVal > 0 ? "Update Discount" : "Add Discount"}
+                      </button>
                     </div>
 
                     {/* Patient Details */}
@@ -1164,14 +1162,13 @@ export default function BillingPage() {
                           </button>
                         </InvoiceDownload>
 
-                        {!selectedRecord.dischargeDate && (
-                          <button
-                            onClick={() => setActiveTab("payments")}
-                            className="w-full flex items-center justify-center px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
-                          >
-                            <CreditCard size={16} className="mr-2" /> Add Payment
-                          </button>
-                        )}
+                        {/* Payments can be added even after discharge */}
+                        <button
+                          onClick={() => setActiveTab("payments")}
+                          className="w-full flex items-center justify-center px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
+                        >
+                          <CreditCard size={16} className="mr-2" /> Add Payment
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1396,15 +1393,14 @@ export default function BillingPage() {
                                       {srv.createdAt ? new Date(srv.createdAt).toLocaleString() : "N/A"}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-center">
-                                      {!selectedRecord.dischargeDate && (
-                                        <button
-                                          onClick={() => handleDeleteServiceItem(srv)}
-                                          className="text-red-500 hover:text-red-700 transition-colors"
-                                          title="Delete service"
-                                        >
-                                          <Trash size={16} />
-                                        </button>
-                                      )}
+                                      {/* Allow deleting services after discharge */}
+                                      <button
+                                        onClick={() => handleDeleteServiceItem(srv)}
+                                        className="text-red-500 hover:text-red-700 transition-colors"
+                                        title="Delete service"
+                                      >
+                                        <Trash size={16} />
+                                      </button>
                                     </td>
                                   </tr>
                                 ))}
@@ -1423,157 +1419,154 @@ export default function BillingPage() {
                         )}
                       </div>
 
-                      {/* Add Service Form (with manual typing or selection) */}
-                      {!selectedRecord.dischargeDate && (
-                        <div className="lg:col-span-1">
-                          <div className="bg-white rounded-lg border border-gray-200 p-6">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Add Hospital Service</h3>
-                            <form onSubmit={handleSubmitService(onSubmitAdditionalService)} className="space-y-4">
-                              {/* Service Name Field with CreatableSelect */}
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Service Name</label>
-                                <Controller
-                                  control={serviceControl}
-                                  name="serviceName"
-                                  render={({ field }) => {
-                                    // If the typed-in service is not in the array, create an object so CreatableSelect won't complain
-                                    const selectedOption = serviceOptions.find(
-                                      (option) => option.label.toLowerCase() === field.value.toLowerCase(),
-                                    ) || {
-                                      label: field.value,
-                                      value: field.value,
-                                    }
+                      {/* Allow adding services after discharge */}
+                      <div className="lg:col-span-1">
+                        <div className="bg-white rounded-lg border border-gray-200 p-6">
+                          <h3 className="text-lg font-semibold text-gray-800 mb-4">Add Hospital Service</h3>
+                          <form onSubmit={handleSubmitService(onSubmitAdditionalService)} className="space-y-4">
+                            {/* Service Name Field with CreatableSelect */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Service Name</label>
+                              <Controller
+                                control={serviceControl}
+                                name="serviceName"
+                                render={({ field }) => {
+                                  // If the typed-in service is not in the array, create an object so CreatableSelect won't complain
+                                  const selectedOption = serviceOptions.find(
+                                    (option) =>
+                                      (option.label || "").toLowerCase() === (field.value || "").toLowerCase(),
+                                  ) || {
+                                    label: field.value,
+                                    value: field.value,
+                                  }
 
-                                    return (
-                                      <CreatableSelect
-                                        {...field}
-                                        isClearable
-                                        options={serviceOptions}
-                                        placeholder="Select or type a service..."
-                                        onChange={(selected) => {
-                                          if (selected) {
-                                            // If user chose an existing service, auto-fill the amount
-                                            field.onChange(selected.label)
-                                            // If that option has a known amount, set it
-                                            const foundOption = serviceOptions.find(
-                                              (opt) => opt.label === selected.label,
-                                            )
-                                            if (foundOption) {
-                                              setValueService("amount", foundOption.amount)
-                                            }
-                                          } else {
-                                            field.onChange("")
-                                            setValueService("amount", 0)
+                                  return (
+                                    <CreatableSelect
+                                      {...field}
+                                      isClearable
+                                      options={serviceOptions}
+                                      placeholder="Select or type a service..."
+                                      onChange={(selected) => {
+                                        if (selected) {
+                                          // If user chose an existing service, auto-fill the amount
+                                          field.onChange(selected.label)
+                                          // If that option has a known amount, set it
+                                          const foundOption = serviceOptions.find((opt) => opt.label === selected.label)
+                                          if (foundOption) {
+                                            setValueService("amount", foundOption.amount)
                                           }
-                                        }}
-                                        value={selectedOption}
-                                      />
-                                    )
-                                  }}
-                                />
-                                {errorsService.serviceName && (
-                                  <p className="text-red-500 text-xs mt-1">{errorsService.serviceName.message}</p>
-                                )}
-                              </div>
+                                        } else {
+                                          field.onChange("")
+                                          setValueService("amount", 0)
+                                        }
+                                      }}
+                                      value={selectedOption}
+                                    />
+                                  )
+                                }}
+                              />
+                              {errorsService.serviceName && (
+                                <p className="text-red-500 text-xs mt-1">{errorsService.serviceName.message}</p>
+                              )}
+                            </div>
 
-                              {/* Amount Field */}
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₹)</label>
-                                <input
-                                  type="number"
-                                  {...registerService("amount")}
-                                  placeholder="Auto-filled on selection, or type your own"
-                                  className={`w-full px-3 py-2 rounded-lg border ${
-                                    errorsService.amount ? "border-red-500" : "border-gray-300"
-                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                                />
-                                {errorsService.amount && (
-                                  <p className="text-red-500 text-xs mt-1">{errorsService.amount.message}</p>
-                                )}
-                              </div>
+                            {/* Amount Field */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₹)</label>
+                              <input
+                                type="number"
+                                {...registerService("amount")}
+                                placeholder="Auto-filled on selection, or type your own"
+                                className={`w-full px-3 py-2 rounded-lg border ${
+                                  errorsService.amount ? "border-red-500" : "border-gray-300"
+                                } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                              />
+                              {errorsService.amount && (
+                                <p className="text-red-500 text-xs mt-1">{errorsService.amount.message}</p>
+                              )}
+                            </div>
 
-                              {/* NEW: Quantity Field */}
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
-                                <input
-                                  type="number"
-                                  {...registerService("quantity")}
-                                  min="1"
-                                  placeholder="e.g., 1"
-                                  className={`w-full px-3 py-2 rounded-lg border ${
-                                    errorsService.quantity ? "border-red-500" : "border-gray-300"
-                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                                />
-                                {errorsService.quantity && (
-                                  <p className="text-red-500 text-xs mt-1">{errorsService.quantity.message}</p>
-                                )}
+                            {/* NEW: Quantity Field */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+                              <input
+                                type="number"
+                                {...registerService("quantity")}
+                                min="1"
+                                placeholder="e.g., 1"
+                                className={`w-full px-3 py-2 rounded-lg border ${
+                                  errorsService.quantity ? "border-red-500" : "border-gray-300"
+                                } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                              />
+                              {errorsService.quantity && (
+                                <p className="text-red-500 text-xs mt-1">{errorsService.quantity.message}</p>
+                              )}
+                            </div>
+
+                            <button
+                              type="submit"
+                              disabled={loading}
+                              className={`w-full py-2 px-4 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors flex items-center justify-center ${
+                                loading ? "opacity-50 cursor-not-allowed" : ""
+                              }`}
+                            >
+                              {loading ? (
+                                "Processing..."
+                              ) : (
+                                <>
+                                  <Plus size={16} className="mr-2" /> Add Service
+                                </>
+                              )}
+                            </button>
+                          </form>
+                        </div>
+
+                        {/* Enhanced Discount Card */}
+                        <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg border border-emerald-200 p-6 mt-6 shadow-sm">
+                          <h3 className="text-lg font-semibold text-emerald-800 mb-4 flex items-center">
+                            <Percent size={18} className="mr-2 text-emerald-600" /> Discount
+                          </h3>
+
+                          {discountVal > 0 ? (
+                            <div className="space-y-4">
+                              <div className="bg-white rounded-lg p-4 shadow-sm border border-emerald-100">
+                                <div className="flex justify-between items-center">
+                                  <div>
+                                    <p className="text-sm text-gray-500">Current Discount</p>
+                                    <p className="text-2xl font-bold text-emerald-600">
+                                      ₹{discountVal.toLocaleString()}
+                                    </p>
+                                  </div>
+                                  <div className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-sm font-medium">
+                                    {discountPercentage}% off
+                                  </div>
+                                </div>
                               </div>
 
                               <button
-                                type="submit"
-                                disabled={loading}
-                                className={`w-full py-2 px-4 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors flex items-center justify-center ${
-                                  loading ? "opacity-50 cursor-not-allowed" : ""
-                                }`}
+                                onClick={() => setIsDiscountModalOpen(true)}
+                                className="w-full py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center"
                               >
-                                {loading ? (
-                                  "Processing..."
-                                ) : (
-                                  <>
-                                    <Plus size={16} className="mr-2" /> Add Service
-                                  </>
-                                )}
+                                <RefreshCw size={16} className="mr-2" /> Update Discount
                               </button>
-                            </form>
-                          </div>
-
-                          {/* Enhanced Discount Card */}
-                          <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg border border-emerald-200 p-6 mt-6 shadow-sm">
-                            <h3 className="text-lg font-semibold text-emerald-800 mb-4 flex items-center">
-                              <Percent size={18} className="mr-2 text-emerald-600" /> Discount
-                            </h3>
-
-                            {discountVal > 0 ? (
-                              <div className="space-y-4">
-                                <div className="bg-white rounded-lg p-4 shadow-sm border border-emerald-100">
-                                  <div className="flex justify-between items-center">
-                                    <div>
-                                      <p className="text-sm text-gray-500">Current Discount</p>
-                                      <p className="text-2xl font-bold text-emerald-600">
-                                        ₹{discountVal.toLocaleString()}
-                                      </p>
-                                    </div>
-                                    <div className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-sm font-medium">
-                                      {discountPercentage}% off
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <button
-                                  onClick={() => setIsDiscountModalOpen(true)}
-                                  className="w-full py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center"
-                                >
-                                  <RefreshCw size={16} className="mr-2" /> Update Discount
-                                </button>
+                            </div>
+                          ) : (
+                            <div className="space-y-4">
+                              <div className="bg-white rounded-lg p-4 shadow-sm border border-dashed border-emerald-200 text-center">
+                                <p className="text-gray-500 mb-2">No discount applied yet</p>
+                                <DollarSign size={24} className="mx-auto text-emerald-300" />
                               </div>
-                            ) : (
-                              <div className="space-y-4">
-                                <div className="bg-white rounded-lg p-4 shadow-sm border border-dashed border-emerald-200 text-center">
-                                  <p className="text-gray-500 mb-2">No discount applied yet</p>
-                                  <DollarSign size={24} className="mx-auto text-emerald-300" />
-                                </div>
 
-                                <button
-                                  onClick={() => setIsDiscountModalOpen(true)}
-                                  className="w-full py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center"
-                                >
-                                  <Percent size={16} className="mr-2" /> Add Discount
-                                </button>
-                              </div>
-                            )}
-                          </div>
+                              <button
+                                onClick={() => setIsDiscountModalOpen(true)}
+                                className="w-full py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center"
+                              >
+                                <Percent size={16} className="mr-2" /> Add Discount
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1666,17 +1659,16 @@ export default function BillingPage() {
                                       {new Date(payment.date).toLocaleString()}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-center">
-                                      {!selectedRecord.dischargeDate && (
-                                        <button
-                                          onClick={() =>
-                                            payment.id && handleDeletePayment(payment.id, payment.amount, payment.type)
-                                          }
-                                          className="text-red-500 hover:text-red-700 transition-colors"
-                                          title="Delete payment"
-                                        >
-                                          <Trash size={16} />
-                                        </button>
-                                      )}
+                                      {/* Allow deleting payments after discharge */}
+                                      <button
+                                        onClick={() =>
+                                          payment.id && handleDeletePayment(payment.id, payment.amount, payment.type)
+                                        }
+                                        className="text-red-500 hover:text-red-700 transition-colors"
+                                        title="Delete payment"
+                                      >
+                                        <Trash size={16} />
+                                      </button>
                                     </td>
                                   </tr>
                                 ))}
@@ -1686,104 +1678,97 @@ export default function BillingPage() {
                         )}
                       </div>
 
-                      {/* Add Payment Form */}
-                      {!selectedRecord.dischargeDate && (
-                        <div className="lg:col-span-1">
-                          <div className="bg-white rounded-lg border border-gray-200 p-6">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                              <CreditCard size={16} className="mr-2 text-teal-600" /> Record Payment
-                            </h3>
-                            <form onSubmit={handleSubmitPayment(onSubmitPayment)} className="space-y-4">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  Payment Amount (₹)
-                                </label>
-                                <input
-                                  type="number"
-                                  {...registerPayment("paymentAmount")}
-                                  placeholder="e.g., 5000"
-                                  className={`w-full px-3 py-2 rounded-lg border ${
-                                    errorsPayment.paymentAmount ? "border-red-500" : "border-gray-300"
-                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                                />
-                                {errorsPayment.paymentAmount && (
-                                  <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentAmount.message}</p>
-                                )}
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Type</label>
-                                <select
-                                  {...registerPayment("paymentType")}
-                                  defaultValue="cash"
-                                  className={`w-full px-3 py-2 rounded-lg border ${
-                                    errorsPayment.paymentType ? "border-red-500" : "border-gray-300"
-                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                                >
-                                  <option value="">Select Payment Type</option>
-                                  <option value="cash">Cash</option>
-                                  <option value="online">Online</option>
-                                  <option value="card">Card</option>
-                                </select>
-                                {errorsPayment.paymentType && (
-                                  <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentType.message}</p>
-                                )}
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                                <select
-                                  {...registerPayment("type")}
-                                  className={`w-full px-3 py-2 rounded-lg border ${
-                                    errorsPayment.type ? "border-red-500" : "border-gray-300"
-                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                                >
-                                  <option value="advance">Advance</option>
-                                  <option value="refund">Refund</option>
-                                </select>
-                                {errorsPayment.type && (
-                                  <p className="text-red-500 text-xs mt-1">{errorsPayment.type.message}</p>
-                                )}
-                              </div>
-                              {/* NEW: WhatsApp Notification Checkbox */}
-                              <div>
-                                <div className="flex items-center mt-4">
-                                  <input
-                                    type="checkbox"
-                                    id="sendWhatsappNotification"
-                                    {...registerPayment("sendWhatsappNotification")}
-                                    className="h-4 w-4 text-teal-600 focus:ring-teal-500 border-gray-300 rounded"
-                                  />
-                                  <label
-                                    htmlFor="sendWhatsappNotification"
-                                    className="ml-2 block text-sm text-gray-900"
-                                  >
-                                    Send message on WhatsApp
-                                  </label>
-                                </div>
-                                {errorsPayment.sendWhatsappNotification && (
-                                  <p className="text-red-500 text-xs mt-1">
-                                    {errorsPayment.sendWhatsappNotification.message}
-                                  </p>
-                                )}
-                              </div>
-                              <button
-                                type="submit"
-                                disabled={loading}
-                                className={`w-full py-2 px-4 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors flex items-center justify-center ${
-                                  loading ? "opacity-50 cursor-not-allowed" : ""
-                                }`}
+                      {/* Allow adding payments after discharge */}
+                      <div className="lg:col-span-1">
+                        <div className="bg-white rounded-lg border border-gray-200 p-6">
+                          <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                            <CreditCard size={16} className="mr-2 text-teal-600" /> Record Payment
+                          </h3>
+                          <form onSubmit={handleSubmitPayment(onSubmitPayment)} className="space-y-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Payment Amount (₹)</label>
+                              <input
+                                type="number"
+                                {...registerPayment("paymentAmount")}
+                                placeholder="e.g., 5000"
+                                className={`w-full px-3 py-2 rounded-lg border ${
+                                  errorsPayment.paymentAmount ? "border-red-500" : "border-gray-300"
+                                } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                              />
+                              {errorsPayment.paymentAmount && (
+                                <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentAmount.message}</p>
+                              )}
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Payment Type</label>
+                              <select
+                                {...registerPayment("paymentType")}
+                                defaultValue="cash"
+                                className={`w-full px-3 py-2 rounded-lg border ${
+                                  errorsPayment.paymentType ? "border-red-500" : "border-gray-300"
+                                } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
                               >
-                                {loading ? (
-                                  "Processing..."
-                                ) : (
-                                  <>
-                                    <Plus size={16} className="mr-2" /> Add Payment
-                                  </>
-                                )}
-                              </button>
-                            </form>
-                          </div>
+                                <option value="">Select Payment Type</option>
+                                <option value="cash">Cash</option>
+                                <option value="online">Online</option>
+                                <option value="card">Card</option>
+                              </select>
+                              {errorsPayment.paymentType && (
+                                <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentType.message}</p>
+                              )}
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                              <select
+                                {...registerPayment("type")}
+                                className={`w-full px-3 py-2 rounded-lg border ${
+                                  errorsPayment.type ? "border-red-500" : "border-gray-300"
+                                } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                              >
+                                <option value="advance">Advance</option>
+                                <option value="refund">Refund</option>
+                              </select>
+                              {errorsPayment.type && (
+                                <p className="text-red-500 text-xs mt-1">{errorsPayment.type.message}</p>
+                              )}
+                            </div>
+                            {/* NEW: WhatsApp Notification Checkbox */}
+                            <div>
+                              <div className="flex items-center mt-4">
+                                <input
+                                  type="checkbox"
+                                  id="sendWhatsappNotification"
+                                  {...registerPayment("sendWhatsappNotification")}
+                                  className="h-4 w-4 text-teal-600 focus:ring-teal-500 border-gray-300 rounded"
+                                />
+                                <label htmlFor="sendWhatsappNotification" className="ml-2 block text-sm text-gray-900">
+                                  Send message on WhatsApp
+                                </label>
+                              </div>
+                              {errorsPayment.sendWhatsappNotification && (
+                                <p className="text-red-500 text-xs mt-1">
+                                  {errorsPayment.sendWhatsappNotification.message}
+                                </p>
+                              )}
+                            </div>
+                            <button
+                              type="submit"
+                              disabled={loading}
+                              className={`w-full py-2 px-4 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors flex items-center justify-center ${
+                                loading ? "opacity-50 cursor-not-allowed" : ""
+                              }`}
+                            >
+                              {loading ? (
+                                "Processing..."
+                              ) : (
+                                <>
+                                  <Plus size={16} className="mr-2" /> Add Payment
+                                </>
+                              )}
+                            </button>
+                          </form>
                         </div>
-                      )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1833,15 +1818,14 @@ export default function BillingPage() {
                                       {agg.lastVisit ? agg.lastVisit.toLocaleString() : "N/A"}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-center">
-                                      {!selectedRecord.dischargeDate && (
-                                        <button
-                                          onClick={() => handleDeleteConsultantCharges(agg.doctorName)}
-                                          className="text-red-500 hover:text-red-700 transition-colors"
-                                          title="Delete consultant charges"
-                                        >
-                                          <Trash size={16} />
-                                        </button>
-                                      )}
+                                      {/* Allow deleting consultant charges after discharge */}
+                                      <button
+                                        onClick={() => handleDeleteConsultantCharges(agg.doctorName)}
+                                        className="text-red-500 hover:text-red-700 transition-colors"
+                                        title="Delete consultant charges"
+                                      >
+                                        <Trash size={16} />
+                                      </button>
                                     </td>
                                   </tr>
                                 ))}
@@ -1861,145 +1845,143 @@ export default function BillingPage() {
                         )}
                       </div>
 
-                      {/* Enhanced Add Consultant Charge Form */}
-                      {!selectedRecord.dischargeDate && (
-                        <div className="lg:col-span-1">
-                          <div className="bg-white rounded-lg border border-gray-200 p-6">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                              <UserPlus size={16} className="mr-2 text-teal-600" /> Add Consultant Charge
-                            </h3>
-                            <form onSubmit={handleSubmitVisit(onSubmitDoctorVisit)} className="space-y-4">
-                              {/* Custom Doctor Toggle */}
-                              <div className="flex items-center space-x-2 mb-4">
-                                <input
-                                  type="checkbox"
-                                  {...registerVisit("isCustomDoctor")}
-                                  id="customDoctorToggle"
-                                  className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
-                                />
-                                <label htmlFor="customDoctorToggle" className="text-sm font-medium text-gray-700">
-                                  Add custom doctor
-                                </label>
-                              </div>
+                      {/* Allow adding consultant charges after discharge */}
+                      <div className="lg:col-span-1">
+                        <div className="bg-white rounded-lg border border-gray-200 p-6">
+                          <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                            <UserPlus size={16} className="mr-2 text-teal-600" /> Add Consultant Charge
+                          </h3>
+                          <form onSubmit={handleSubmitVisit(onSubmitDoctorVisit)} className="space-y-4">
+                            {/* Custom Doctor Toggle */}
+                            <div className="flex items-center space-x-2 mb-4">
+                              <input
+                                type="checkbox"
+                                {...registerVisit("isCustomDoctor")}
+                                id="customDoctorToggle"
+                                className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                              />
+                              <label htmlFor="customDoctorToggle" className="text-sm font-medium text-gray-700">
+                                Add custom doctor
+                              </label>
+                            </div>
 
-                              {/* Doctor Selection or Custom Entry */}
-                              {!watchIsCustomDoctor ? (
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    <Search size={16} className="inline mr-1" />
-                                    Select Doctor
-                                  </label>
-                                  <Controller
-                                    control={visitControl} // UPDATED: Use visitControl
-                                    name="doctorId"
-                                    render={({ field }) => (
-                                      <Select
-                                        {...field}
-                                        options={doctorOptions} // Use pre-mapped options
-                                        isClearable
-                                        placeholder="Search or select a doctor..."
-                                        onChange={(selectedOption) => {
-                                          field.onChange(selectedOption ? selectedOption.value : "")
-                                        }}
-                                        value={doctorOptions.find((option) => option.value === field.value) || null} // UPDATED: Correctly map field.value to option object
-                                        classNamePrefix="react-select"
-                                        styles={{
-                                          control: (base, state) => ({
-                                            ...base,
-                                            borderColor: errorsVisit.doctorId ? "rgb(239 68 68)" : base.borderColor,
-                                            boxShadow: state.isFocused ? "0 0 0 2px rgb(20 184 166)" : base.boxShadow,
-                                            "&:hover": {
-                                              borderColor: errorsVisit.doctorId
-                                                ? "rgb(239 68 68)"
-                                                : ((base["&:hover"] as any)?.borderColor ?? "transparent"),
-                                            },
-                                          }),
-                                        }}
-                                      />
-                                    )}
-                                  />
-                                  {errorsVisit.doctorId && (
-                                    <p className="text-red-500 text-xs mt-1">{errorsVisit.doctorId.message}</p>
-                                  )}
-                                </div>
-                              ) : (
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Custom Doctor Name
-                                  </label>
-                                  <input
-                                    type="text"
-                                    {...registerVisit("customDoctorName")}
-                                    placeholder="Enter doctor name"
-                                    className={`w-full px-3 py-2 rounded-lg border ${
-                                      errorsVisit.customDoctorName ? "border-red-500" : "border-gray-300"
-                                    } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                                  />
-                                  {errorsVisit.customDoctorName && (
-                                    <p className="text-red-500 text-xs mt-1">{errorsVisit.customDoctorName.message}</p>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Visit Charge */}
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Visit Charge (₹)</label>
-                                <input
-                                  type="number"
-                                  {...registerVisit("visitCharge")}
-                                  placeholder={watchIsCustomDoctor ? "Enter charge amount" : "Auto-filled or override"}
-                                  className={`w-full px-3 py-2 rounded-lg border ${
-                                    errorsVisit.visitCharge ? "border-red-500" : "border-gray-300"
-                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                                />
-                                {errorsVisit.visitCharge && (
-                                  <p className="text-red-500 text-xs mt-1">{errorsVisit.visitCharge.message}</p>
-                                )}
-                              </div>
-
-                              {/* Visit Times */}
+                            {/* Doctor Selection or Custom Entry */}
+                            {!watchIsCustomDoctor ? (
                               <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  <Clock size={16} className="inline mr-1" />
-                                  Number of Visits
+                                  <Search size={16} className="inline mr-1" />
+                                  Select Doctor
+                                </label>
+                                <Controller
+                                  control={visitControl} // UPDATED: Use visitControl
+                                  name="doctorId"
+                                  render={({ field }) => (
+                                    <Select
+                                      {...field}
+                                      options={doctorOptions} // Use pre-mapped options
+                                      isClearable
+                                      placeholder="Search or select a doctor..."
+                                      onChange={(selectedOption) => {
+                                        field.onChange(selectedOption ? selectedOption.value : "")
+                                      }}
+                                      value={doctorOptions.find((option) => option.value === field.value) || null} // UPDATED: Correctly map field.value to option object
+                                      classNamePrefix="react-select"
+                                      styles={{
+                                        control: (base, state) => ({
+                                          ...base,
+                                          borderColor: errorsVisit.doctorId ? "rgb(239 68 68)" : base.borderColor,
+                                          boxShadow: state.isFocused ? "0 0 0 2px rgb(20 184 166)" : base.boxShadow,
+                                          "&:hover": {
+                                            borderColor: errorsVisit.doctorId
+                                              ? "rgb(239 68 68)"
+                                              : ((base["&:hover"] as any)?.borderColor ?? "transparent"),
+                                          },
+                                        }),
+                                      }}
+                                    />
+                                  )}
+                                />
+                                {errorsVisit.doctorId && (
+                                  <p className="text-red-500 text-xs mt-1">{errorsVisit.doctorId.message}</p>
+                                )}
+                              </div>
+                            ) : (
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Custom Doctor Name
                                 </label>
                                 <input
-                                  type="number"
-                                  {...registerVisit("visitTimes")}
-                                  min="1"
-                                  max="10"
-                                  placeholder="e.g., 2 for 2 visits"
+                                  type="text"
+                                  {...registerVisit("customDoctorName")}
+                                  placeholder="Enter doctor name"
                                   className={`w-full px-3 py-2 rounded-lg border ${
-                                    errorsVisit.visitTimes ? "border-red-500" : "border-gray-300"
+                                    errorsVisit.customDoctorName ? "border-red-500" : "border-gray-300"
                                   } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
                                 />
-                                {errorsVisit.visitTimes && (
-                                  <p className="text-red-500 text-xs mt-1">{errorsVisit.visitTimes.message}</p>
+                                {errorsVisit.customDoctorName && (
+                                  <p className="text-red-500 text-xs mt-1">{errorsVisit.customDoctorName.message}</p>
                                 )}
-                                <p className="text-xs text-gray-500 mt-1">
-                                  Each visit will be recorded separately with current timestamp
-                                </p>
                               </div>
+                            )}
 
-                              <button
-                                type="submit"
-                                disabled={loading}
-                                className={`w-full py-2 px-4 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors flex items-center justify-center ${
-                                  loading ? "opacity-50 cursor-not-allowed" : ""
-                                }`}
-                              >
-                                {loading ? (
-                                  "Processing..."
-                                ) : (
-                                  <>
-                                    <Plus size={16} className="mr-2" /> Add Consultant Charge
-                                  </>
-                                )}
-                              </button>
-                            </form>
-                          </div>
+                            {/* Visit Charge */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Visit Charge (₹)</label>
+                              <input
+                                type="number"
+                                {...registerVisit("visitCharge")}
+                                placeholder={watchIsCustomDoctor ? "Enter charge amount" : "Auto-filled or override"}
+                                className={`w-full px-3 py-2 rounded-lg border ${
+                                  errorsVisit.visitCharge ? "border-red-500" : "border-gray-300"
+                                } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                              />
+                              {errorsVisit.visitCharge && (
+                                <p className="text-red-500 text-xs mt-1">{errorsVisit.visitCharge.message}</p>
+                              )}
+                            </div>
+
+                            {/* Visit Times */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                <Clock size={16} className="inline mr-1" />
+                                Number of Visits
+                              </label>
+                              <input
+                                type="number"
+                                {...registerVisit("visitTimes")}
+                                min="1"
+                                max="10"
+                                placeholder="e.g., 2 for 2 visits"
+                                className={`w-full px-3 py-2 rounded-lg border ${
+                                  errorsVisit.visitTimes ? "border-red-500" : "border-gray-300"
+                                } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                              />
+                              {errorsVisit.visitTimes && (
+                                <p className="text-red-500 text-xs mt-1">{errorsVisit.visitTimes.message}</p>
+                              )}
+                              <p className="text-xs text-gray-500 mt-1">
+                                Each visit will be recorded separately with current timestamp
+                              </p>
+                            </div>
+
+                            <button
+                              type="submit"
+                              disabled={loading}
+                              className={`w-full py-2 px-4 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors flex items-center justify-center ${
+                                loading ? "opacity-50 cursor-not-allowed" : ""
+                              }`}
+                            >
+                              {loading ? (
+                                "Processing..."
+                              ) : (
+                                <>
+                                  <Plus size={16} className="mr-2" /> Add Consultant Charge
+                                </>
+                              )}
+                            </button>
+                          </form>
                         </div>
-                      )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -2088,17 +2070,16 @@ export default function BillingPage() {
                               {new Date(payment.date).toLocaleString()}
                             </td>
                             <td className="px-4 py-3 text-sm text-center">
-                              {!selectedRecord.dischargeDate && (
-                                <button
-                                  onClick={() =>
-                                    payment.id && handleDeletePayment(payment.id, payment.amount, payment.type)
-                                  }
-                                  className="text-red-500 hover:text-red-700 transition-colors"
-                                  title="Delete payment"
-                                >
-                                  <Trash size={16} />
-                                </button>
-                              )}
+                              {/* Allow deleting payments from history modal after discharge */}
+                              <button
+                                onClick={() =>
+                                  payment.id && handleDeletePayment(payment.id, payment.amount, payment.type)
+                                }
+                                className="text-red-500 hover:text-red-700 transition-colors"
+                                title="Delete payment"
+                              >
+                                <Trash size={16} />
+                              </button>
                             </td>
                           </tr>
                         ))}

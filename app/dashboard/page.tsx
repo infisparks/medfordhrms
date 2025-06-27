@@ -104,12 +104,13 @@ interface IPDAppointment {
   roomType: string
   status: string
   services: IPDService[]
-  totalAmount: number
-  totalDeposit: number
+  totalAmount: number // This is total service amount (gross)
+  totalDeposit: number // This is net deposit (advances - refunds)
   totalRefunds: number
+  discount: number // NEW: Discount amount for IPD
   payments: IPDPayment[]
   createdAt: string
-  remainingAmount?: number
+  remainingAmount?: number // This will be (totalAmount - discount) - totalDeposit
   type: "IPD"
   details?: any
 }
@@ -386,7 +387,8 @@ const DashboardPage: React.FC = () => {
                     createdAt: s.createdAt,
                   }))
                   const totalSvc = services.reduce((sum, s) => sum + s.amount, 0)
-                  const remaining = totalSvc - netDep
+                  const discountAmount = Number(bill.discount) || 0 // Extract discount
+                  const remaining = totalSvc - discountAmount - netDep // Calculate remaining with discount
                   if (info) {
                     tempIpd.push({
                       id: `${pid}_${ipdid}`,
@@ -404,6 +406,7 @@ const DashboardPage: React.FC = () => {
                       totalAmount: totalSvc,
                       totalDeposit: netDep,
                       totalRefunds: totalRe,
+                      discount: discountAmount, // Add discount to the object
                       payments,
                       remainingAmount: remaining,
                       createdAt: rec.createdAt,
@@ -713,7 +716,8 @@ const DashboardPage: React.FC = () => {
                       createdAt: s.createdAt,
                     }))
                     const totalSvc = services.reduce((sum, s) => sum + s.amount, 0)
-                    const remaining = totalSvc - netDep
+                    const discountAmount = Number(bill.discount) || 0 // Extract discount
+                    const remaining = totalSvc - discountAmount - netDep // Calculate remaining with discount
                     allPatientApps.push({
                       id: `${pid}_${ipdid}`,
                       patientId: pid,
@@ -730,6 +734,7 @@ const DashboardPage: React.FC = () => {
                       totalAmount: totalSvc,
                       totalDeposit: netDep,
                       totalRefunds: totalRe,
+                      discount: discountAmount, // Add discount to the object
                       payments,
                       remainingAmount: remaining,
                       createdAt: rec.createdAt,
@@ -1064,21 +1069,15 @@ const DashboardPage: React.FC = () => {
                         <div className="space-y-2">
                           <div className="flex justify-between items-center">
                             <span className="text-gray-600 text-sm">💵 Cash</span>
-                            <span className="font-semibold text-sky-600">
-                              {formatCurrency(statistics.opdCash)}
-                            </span>
+                            <span className="font-semibold text-sky-600">{formatCurrency(statistics.opdCash)}</span>
                           </div>
                           <div className="flex justify-between items-center">
                             <span className="text-gray-600 text-sm">💳 Online</span>
-                            <span className="font-semibold text-sky-600">
-                              {formatCurrency(statistics.opdOnline)}
-                            </span>
+                            <span className="font-semibold text-sky-600">{formatCurrency(statistics.opdOnline)}</span>
                           </div>
                           <div className="flex justify-between items-center pt-2 border-t border-sky-200">
                             <span className="text-sky-700 font-medium">Total OPD</span>
-                            <span className="font-bold text-sky-700">
-                              {formatCurrency(statistics.totalOpdAmount)}
-                            </span>
+                            <span className="font-bold text-sky-700">{formatCurrency(statistics.totalOpdAmount)}</span>
                           </div>
                         </div>
                       </div>
@@ -1088,9 +1087,7 @@ const DashboardPage: React.FC = () => {
                         <div className="space-y-2">
                           <div className="flex justify-between items-center">
                             <span className="text-gray-600 text-sm">💵 Cash</span>
-                            <span className="font-semibold text-orange-600">
-                              {formatCurrency(statistics.ipdCash)}
-                            </span>
+                            <span className="font-semibold text-orange-600">{formatCurrency(statistics.ipdCash)}</span>
                           </div>
                           <div className="flex justify-between items-center">
                             <span className="text-gray-600 text-sm">💳 Online</span>
@@ -1232,7 +1229,7 @@ const DashboardPage: React.FC = () => {
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                               Age / Gender
                             </th>
-                            
+
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                               Action
                             </th>
@@ -1286,7 +1283,7 @@ const DashboardPage: React.FC = () => {
                                 <div className="text-sm text-gray-900">{patient.age || "N/A"}</div>
                                 <div className="text-xs text-gray-500">{patient.gender || "N/A"}</div>
                               </td>
-                             
+
                               <td className="px-6 py-4 whitespace-nowrap text-sm">
                                 <button
                                   onClick={() => openPatientAppointmentsModal(patient)}
@@ -1308,97 +1305,94 @@ const DashboardPage: React.FC = () => {
                             </td>
                           </tr>
                         )
-                      ) : (
-                        filteredAppointments.length > 0 ? (
-                          filteredAppointments.map((app) => (
-                            <tr key={app.id} className="hover:bg-gray-50 transition-colors">
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="flex items-center">
-                                  <div className="p-2 bg-gray-100 rounded-full mr-3">
-                                    <User className="h-4 w-4 text-gray-600" />
-                                  </div>
-                                  <div>
-                                    <div className="text-sm font-medium text-gray-900">{app.name}</div>
-                                    {(app.type === "IPD" || app.type === "OT") && (
-                                      <div className="text-xs text-gray-500">UHID: {app.uhid}</div>
-                                    )}
-                                  </div>
+                      ) : filteredAppointments.length > 0 ? (
+                        filteredAppointments.map((app) => (
+                          <tr key={app.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="flex items-center">
+                                <div className="p-2 bg-gray-100 rounded-full mr-3">
+                                  <User className="h-4 w-4 text-gray-600" />
                                 </div>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="text-sm text-gray-500">{app.phone}</div>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="text-sm text-gray-900">
-                                  {format(
-                                    new Date(
-                                      app.type === "OPD" || app.type === "OT"
-                                        ? app.date
-                                        : (app as IPDAppointment).admissionDate
-                                    ),
-                                    "dd MMM, yyyy"
+                                <div>
+                                  <div className="text-sm font-medium text-gray-900">{app.name}</div>
+                                  {(app.type === "IPD" || app.type === "OT") && (
+                                    <div className="text-xs text-gray-500">UHID: {app.uhid}</div>
                                   )}
                                 </div>
-                                <div className="text-xs text-gray-500 flex items-center">
-                                  <Clock className="h-3 w-3 mr-1" />
-                                  {app.type === "OPD" || app.type === "OT"
-                                    ? app.time
-                                    : (app as IPDAppointment).admissionTime}
-                                </div>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <span
-                                  className={`px-3 py-1 rounded-full text-xs font-medium ${getBadgeColor(app.type)}`}
-                                >
-                                  {app.type}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                {app.type === "OPD" && (
-                                  <div>
-                                    <div className="text-sm text-gray-600 mb-1">
-                                      {getModalitiesSummary((app as OPDAppointment).modalities)}
-                                    </div>
-                                    <div className="text-sm font-medium text-gray-900">
-                                      {formatCurrency((app as OPDAppointment).payment.totalPaid)}
-                                    </div>
-                                  </div>
-                                )}
-                                {app.type === "IPD" && (
-                                  <div>
-                                    <div className="text-sm font-medium text-gray-900">
-                                      {formatCurrency((app as IPDAppointment).totalDeposit)}
-                                    </div>
-                                    {((app as IPDAppointment).remainingAmount ?? 0) > 0 && (
-                                      <div className="text-xs text-red-500">
-                                        Pending: {formatCurrency((app as IPDAppointment).remainingAmount!)}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                                {app.type === "OT" && <div className="text-sm text-gray-500">Procedure</div>}
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                <button
-                                  onClick={() => openModal(app)}
-                                  className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors"
-                                >
-                                  View Details
-                                </button>
-                              </td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td colSpan={6} className="px-6 py-12 text-center">
-                              <div className="flex flex-col items-center">
-                                <FileText className="h-12 w-12 text-gray-300 mb-4" />
-                                <p className="text-gray-500 text-lg">No appointments found</p>
-                                <p className="text-gray-400 text-sm">Try adjusting your filters</p>
                               </div>
                             </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-gray-500">{app.phone}</div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-gray-900">
+                                {format(
+                                  new Date(
+                                    app.type === "OPD" || app.type === "OT"
+                                      ? app.date
+                                      : (app as IPDAppointment).admissionDate,
+                                  ),
+                                  "dd MMM, yyyy",
+                                )}
+                              </div>
+                              <div className="text-xs text-gray-500 flex items-center">
+                                <Clock className="h-3 w-3 mr-1" />
+                                {app.type === "OPD" || app.type === "OT"
+                                  ? app.time
+                                  : (app as IPDAppointment).admissionTime}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`px-3 py-1 rounded-full text-xs font-medium ${getBadgeColor(app.type)}`}>
+                                {app.type}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              {app.type === "OPD" && (
+                                <div>
+                                  <div className="text-sm text-gray-600 mb-1">
+                                    {getModalitiesSummary((app as OPDAppointment).modalities)}
+                                  </div>
+                                  <div className="text-sm font-medium text-gray-900">
+                                    {formatCurrency((app as OPDAppointment).payment.totalPaid)}
+                                  </div>
+                                </div>
+                              )}
+                              {app.type === "IPD" && (
+                                <div>
+                                  <div className="text-sm font-medium text-gray-900">
+                                    {formatCurrency((app as IPDAppointment).totalDeposit)}
+                                  </div>
+                                  {((app as IPDAppointment).remainingAmount ?? 0) > 0 && (
+                                    <div className="text-xs text-red-500">
+                                      Pending: {formatCurrency((app as IPDAppointment).remainingAmount!)}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              {app.type === "OT" && <div className="text-sm text-gray-500">Procedure</div>}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              <button
+                                onClick={() => openModal(app)}
+                                className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                              >
+                                View Details
+                              </button>
+                            </td>
                           </tr>
-                        ))}
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={6} className="px-6 py-12 text-center">
+                            <div className="flex flex-col items-center">
+                              <FileText className="h-12 w-12 text-gray-300 mb-4" />
+                              <p className="text-gray-500 text-lg">No appointments found</p>
+                              <p className="text-gray-400 text-sm">Try adjusting your filters</p>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1433,8 +1427,8 @@ const DashboardPage: React.FC = () => {
                           selectedAppointment.type === "OPD"
                             ? "bg-gradient-to-r from-sky-100 to-blue-100"
                             : selectedAppointment.type === "IPD"
-                            ? "bg-gradient-to-r from-orange-100 to-red-100"
-                            : "bg-gradient-to-r from-purple-100 to-pink-100"
+                              ? "bg-gradient-to-r from-orange-100 to-red-100"
+                              : "bg-gradient-to-r from-purple-100 to-pink-100"
                         }`}
                       >
                         {selectedAppointment.type === "OPD" && <Activity className="text-sky-600 h-6 w-6" />}
@@ -1466,9 +1460,9 @@ const DashboardPage: React.FC = () => {
                                 new Date(
                                   selectedAppointment.type === "IPD"
                                     ? (selectedAppointment as IPDAppointment).admissionDate
-                                    : selectedAppointment.date
+                                    : selectedAppointment.date,
                                 ),
-                                "dd MMM, yyyy"
+                                "dd MMM, yyyy",
                               )}
                             </p>
                           </div>
@@ -1540,9 +1534,6 @@ const DashboardPage: React.FC = () => {
                               {(selectedAppointment as OPDAppointment).payment.discount > 0 && (
                                 <div>
                                   <p className="text-sm text-gray-500">Discount</p>
-                                  <p className="font-medium text-green-600">
-                                    ₹{(selectedAppointment as OPDAppointment).payment.discount}
-                                  </p>
                                 </div>
                               )}
                             </div>
@@ -1561,38 +1552,36 @@ const DashboardPage: React.FC = () => {
                               <FileText className="mr-2 h-5 w-5" /> Services & Modalities
                             </h3>
                             <div className="space-y-3">
-                              {(selectedAppointment as OPDAppointment).modalities.map(
-                                (m: IModality, i: number) => (
-                                  <div key={i} className="border border-purple-200 rounded p-3 bg-white">
-                                    <div className="flex justify-between items-start mb-2">
-                                      <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs font-medium capitalize">
-                                        {m.type}
-                                      </span>
-                                      <span className="font-semibold text-purple-700">₹{m.charges}</span>
-                                    </div>
-                                    {m.doctor && (
-                                      <div className="text-xs text-gray-600">
-                                        <strong>Doctor:</strong> {m.doctor}
-                                      </div>
-                                    )}
-                                    {m.specialist && (
-                                      <div className="text-xs text-gray-600">
-                                        <strong>Specialist:</strong> {m.specialist}
-                                      </div>
-                                    )}
-                                    {m.service && (
-                                      <div className="text-xs text-gray-600">
-                                        <strong>Service:</strong> {m.service}
-                                      </div>
-                                    )}
-                                    {m.visitType && (
-                                      <div className="text-xs text-gray-600">
-                                        <strong>Visit Type:</strong> {m.visitType}
-                                      </div>
-                                    )}
+                              {(selectedAppointment as OPDAppointment).modalities.map((m: IModality, i: number) => (
+                                <div key={i} className="border border-purple-200 rounded p-3 bg-white">
+                                  <div className="flex justify-between items-start mb-2">
+                                    <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs font-medium capitalize">
+                                      {m.type}
+                                    </span>
+                                    <span className="font-semibold text-purple-700">₹{m.charges}</span>
                                   </div>
-                                )
-                              )}
+                                  {m.doctor && (
+                                    <div className="text-xs text-gray-600">
+                                      <strong>Doctor:</strong> {m.doctor}
+                                    </div>
+                                  )}
+                                  {m.specialist && (
+                                    <div className="text-xs text-gray-600">
+                                      <strong>Specialist:</strong> {m.specialist}
+                                    </div>
+                                  )}
+                                  {m.service && (
+                                    <div className="text-xs text-gray-600">
+                                      <strong>Service:</strong> {m.service}
+                                    </div>
+                                  )}
+                                  {m.visitType && (
+                                    <div className="text-xs text-gray-600">
+                                      <strong>Visit Type:</strong> {m.visitType}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
                             </div>
                             <div className="mt-4 p-4 bg-white rounded-lg border border-purple-200">
                               <div className="flex justify-between items-center text-lg font-semibold">
@@ -1757,6 +1746,14 @@ const DashboardPage: React.FC = () => {
                                 {formatCurrency((selectedAppointment as IPDAppointment).totalAmount)}
                               </span>
                             </div>
+                            {(selectedAppointment as IPDAppointment).discount > 0 && (
+                              <div className="flex justify-between items-center">
+                                <span className="text-gray-600">Discount Applied:</span>
+                                <span className="font-semibold text-red-600">
+                                  {formatCurrency((selectedAppointment as IPDAppointment).discount)}
+                                </span>
+                              </div>
+                            )}
                             <div className="flex justify-between items-center">
                               <span className="text-gray-600">Total Net Payments:</span>
                               <span className="font-semibold text-green-700">
@@ -1775,30 +1772,19 @@ const DashboardPage: React.FC = () => {
                               <span className="text-blue-800 font-bold text-lg">Net Balance:</span>
                               <span
                                 className={`font-bold text-xl ${
-                                  (selectedAppointment as IPDAppointment).totalAmount -
-                                    (selectedAppointment as IPDAppointment).totalDeposit >
-                                  0
+                                  (selectedAppointment as IPDAppointment).remainingAmount! > 0
                                     ? "text-red-600"
-                                    : (selectedAppointment as IPDAppointment).totalAmount -
-                                        (selectedAppointment as IPDAppointment).totalDeposit <
-                                      0
-                                    ? "text-green-600"
-                                    : "text-gray-800"
+                                    : (selectedAppointment as IPDAppointment).remainingAmount! < 0
+                                      ? "text-green-600"
+                                      : "text-gray-800"
                                 }`}
                               >
-                                {formatCurrency(
-                                  (selectedAppointment as IPDAppointment).totalAmount -
-                                    (selectedAppointment as IPDAppointment).totalDeposit
-                                )}
-                                {((selectedAppointment as IPDAppointment).totalAmount -
-                                  (selectedAppointment as IPDAppointment).totalDeposit) >
-                                0
+                                {formatCurrency((selectedAppointment as IPDAppointment).remainingAmount!)}
+                                {(selectedAppointment as IPDAppointment).remainingAmount! > 0
                                   ? " (Due)"
-                                  : (selectedAppointment as IPDAppointment).totalAmount -
-                                      (selectedAppointment as IPDAppointment).totalDeposit <
-                                    0
-                                  ? " (Refundable)"
-                                  : ""}
+                                  : (selectedAppointment as IPDAppointment).remainingAmount! < 0
+                                    ? " (Refundable)"
+                                    : ""}
                               </span>
                             </div>
                           </div>
@@ -1864,15 +1850,13 @@ const DashboardPage: React.FC = () => {
                         {patientAllAppointments.map((app) => (
                           <div key={app.id} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
                             <div className="flex justify-between items-center mb-2">
-                              <span
-                                className={`px-3 py-1 rounded-full text-xs font-medium ${getBadgeColor(app.type)}`}
-                              >
+                              <span className={`px-3 py-1 rounded-full text-xs font-medium ${getBadgeColor(app.type)}`}>
                                 {app.type}
                               </span>
                               <span className="text-sm text-gray-600">
                                 {format(
                                   new Date(app.type === "IPD" ? (app as IPDAppointment).admissionDate : app.date),
-                                  "dd MMM, yyyy"
+                                  "dd MMM, yyyy",
                                 )}
                                 {" at "}
                                 {app.type === "OPD" || app.type === "OT"

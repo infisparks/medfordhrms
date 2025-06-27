@@ -20,7 +20,7 @@ import {
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
 import ProtectedRoute from "@/components/ProtectedRoute"
-import { Search, DollarSign, Bed, RefreshCw, Filter, FileText, Banknote } from "lucide-react"
+import { Search, DollarSign, Bed, RefreshCw, Filter, FileText, Banknote, Tag } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -77,6 +77,7 @@ interface IPDPatient {
   remainingAmount: number
   createdAt: string
   enteredBy?: string
+  discount?: number // NEW: Added discount field
 }
 
 interface Doctor {
@@ -260,6 +261,7 @@ const IPDDashboardPage: React.FC = () => {
                 (sum: number, service: IPDService) => sum + (Number(service.amount) || 0),
                 0,
               )
+              const discountAmount = Number(billingData?.discount) || 0 // Extract discount
 
               // Create IPD patient object
               const ipdPatient: IPDPatient = {
@@ -285,9 +287,10 @@ const IPDDashboardPage: React.FC = () => {
                 totalDeposit: netDeposit, // Use netDeposit here
                 totalRefunds, // Add totalRefunds
                 payments,
-                remainingAmount: totalServiceAmount - netDeposit, // Calculate remaining based on netDeposit
+                remainingAmount: totalServiceAmount - netDeposit - discountAmount, // Calculate remaining based on netDeposit and discount
                 createdAt: ipdData.createdAt || ipdData.admissionDate,
                 enteredBy: ipdData.enteredBy,
+                discount: discountAmount, // Assign discount
               }
 
               allPatients.push(ipdPatient)
@@ -339,7 +342,8 @@ const IPDDashboardPage: React.FC = () => {
     const activePatients = ipdPatients.filter((p) => p.status === "active")
     const dischargedPatients = ipdPatients.filter((p) => p.status === "discharged")
 
-    const totalRevenue = ipdPatients.reduce((sum, p) => sum + p.totalDeposit, 0) // totalDeposit is now netDeposit
+    // Total revenue should consider services minus discounts
+    const totalRevenue = ipdPatients.reduce((sum, p) => sum + (p.totalAmount - (p.discount || 0)), 0)
     const pendingAmount = ipdPatients.reduce((sum, p) => sum + Math.max(0, p.remainingAmount), 0)
     const overallRefunds = ipdPatients.reduce((sum, p) => sum + p.totalRefunds, 0) // Sum of all refunds
 
@@ -926,6 +930,14 @@ const IPDDashboardPage: React.FC = () => {
                           <span className="text-gray-600">Total Charges:</span>
                           <span className="font-medium">{formatCurrency(selectedPatient.totalAmount)}</span>
                         </div>
+                        {selectedPatient.discount && selectedPatient.discount > 0 && (
+                          <div className="flex justify-between text-green-600">
+                            <span className="flex items-center">
+                              <Tag size={14} className="mr-1" /> Discount:
+                            </span>
+                            <span className="font-medium">- {formatCurrency(selectedPatient.discount)}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between">
                           <span className="text-gray-600">Total Net Paid:</span>
                           <span className="font-medium text-green-600">
@@ -944,10 +956,19 @@ const IPDDashboardPage: React.FC = () => {
                           <span className="text-gray-600">Remaining Balance:</span>
                           <span
                             className={`font-medium ${
-                              selectedPatient.remainingAmount > 0 ? "text-red-600" : "text-green-600"
+                              selectedPatient.totalAmount -
+                                (selectedPatient.discount || 0) -
+                                selectedPatient.totalDeposit >
+                              0
+                                ? "text-red-600"
+                                : "text-green-600"
                             }`}
                           >
-                            {formatCurrency(selectedPatient.remainingAmount)}
+                            {formatCurrency(
+                              selectedPatient.totalAmount -
+                                (selectedPatient.discount || 0) -
+                                selectedPatient.totalDeposit,
+                            )}
                           </span>
                         </div>
                       </div>
@@ -1045,6 +1066,14 @@ const IPDDashboardPage: React.FC = () => {
                             {formatCurrency(selectedPatient.totalAmount)}
                           </div>
                         </div>
+                        {selectedPatient.discount && selectedPatient.discount > 0 && (
+                          <div className="p-3 bg-white rounded-lg shadow-sm">
+                            <div className="text-sm text-gray-600">Discount</div>
+                            <div className="text-xl font-bold text-green-600">
+                              {formatCurrency(selectedPatient.discount)}
+                            </div>
+                          </div>
+                        )}
                         <div className="p-3 bg-white rounded-lg shadow-sm">
                           <div className="text-sm text-gray-600">Total Refunds Issued</div>
                           <div className="text-xl font-bold text-blue-600">
@@ -1055,17 +1084,33 @@ const IPDDashboardPage: React.FC = () => {
                           <div className="text-sm text-gray-600">Net Balance</div>
                           <div
                             className={`text-xl font-bold ${
-                              selectedPatient.totalAmount - selectedPatient.totalDeposit > 0
+                              selectedPatient.totalAmount -
+                                (selectedPatient.discount || 0) -
+                                selectedPatient.totalDeposit >
+                              0
                                 ? "text-red-600"
-                                : selectedPatient.totalAmount - selectedPatient.totalDeposit < 0
+                                : selectedPatient.totalAmount -
+                                      (selectedPatient.discount || 0) -
+                                      selectedPatient.totalDeposit <
+                                    0
                                   ? "text-green-600"
                                   : "text-gray-800"
                             }`}
                           >
-                            {formatCurrency(selectedPatient.totalAmount - selectedPatient.totalDeposit)}
-                            {selectedPatient.totalAmount - selectedPatient.totalDeposit > 0
+                            {formatCurrency(
+                              selectedPatient.totalAmount -
+                                (selectedPatient.discount || 0) -
+                                selectedPatient.totalDeposit,
+                            )}
+                            {selectedPatient.totalAmount -
+                              (selectedPatient.discount || 0) -
+                              selectedPatient.totalDeposit >
+                            0
                               ? " (Due)"
-                              : selectedPatient.totalAmount - selectedPatient.totalDeposit < 0
+                              : selectedPatient.totalAmount -
+                                    (selectedPatient.discount || 0) -
+                                    selectedPatient.totalDeposit <
+                                  0
                                 ? " (Refundable)"
                                 : ""}
                           </div>

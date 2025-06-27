@@ -79,34 +79,57 @@ export function EditAppointmentForm({ form, doctors, appointmentId, patientId }:
   }, [watchedModalities.length, watchedAppointmentType, totalModalityCharges, setValue])
 
   // Fixed payment calculation logic
-  useEffect(() => {
-    if (watchedAppointmentType !== "visithospital") return
+ // 1) Shift the total paid into the newly selected method
+useEffect(() => {
+  if (watchedAppointmentType !== "visithospital") return;
 
-    const totalCharges = totalModalityCharges
-    const cashAmount = Number(watchedCashAmount) || 0
-    const onlineAmount = Number(watchedOnlineAmount) || 0
-    const totalPaid = cashAmount + onlineAmount
+  // Sum whatever's currently entered
+  const cash = Number(watch("cashAmount")) || 0;
+  const online = Number(watch("onlineAmount")) || 0;
+  const totalPaid = cash + online;
 
-    let discount = 0
+  if (watchedPaymentMethod === "cash") {
+    // Move all paid into cash, zero out online
+    setValue("cashAmount", totalPaid);
+    setValue("onlineAmount", 0);
+  } else if (watchedPaymentMethod === "online") {
+    // Move all paid into online, zero out cash
+    setValue("onlineAmount", totalPaid);
+    setValue("cashAmount", 0);
+  }
+}, [
+  watchedAppointmentType,
+  watchedPaymentMethod,
+  setValue,
+  watch,
+]);
 
-    // Calculate discount based on the difference between total charges and amount paid
-    if (totalPaid < totalCharges) {
-      discount = totalCharges - totalPaid
-    }
+// 2) Recalculate discount any time the paid amounts or total charges change
+useEffect(() => {
+  if (watchedAppointmentType !== "visithospital") return;
 
-    // Only update if discount has actually changed
-    if (watch("discount") !== discount) {
-      setValue("discount", discount)
-    }
-  }, [
-    watchedAppointmentType,
-    watchedPaymentMethod,
-    watchedCashAmount,
-    watchedOnlineAmount,
-    totalModalityCharges,
-    setValue,
-    watch,
-  ])
+  const totalCharges = totalModalityCharges;
+  const cashAmount = Number(watchedCashAmount) || 0;
+  const onlineAmount = Number(watchedOnlineAmount) || 0;
+  const totalPaid = cashAmount + onlineAmount;
+
+  // Discount is whatever is left if paid < charges
+  const discount = totalPaid < totalCharges
+    ? totalCharges - totalPaid
+    : 0;
+
+  // Only set it if it's actually different
+  if (watch("discount") !== discount) {
+    setValue("discount", discount);
+  }
+}, [
+  watchedAppointmentType,
+  totalModalityCharges,
+  watchedCashAmount,
+  watchedOnlineAmount,
+  setValue,
+  watch,
+]);
 
   // Fixed calculation: Final amount = Cash + Online (total amount paid)
   const calculateTotalAmount = () => {
