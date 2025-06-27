@@ -621,7 +621,7 @@ const IPDBookingPage: React.FC = () => {
           amount: data.deposit,
           date: currentTime,
           paymentType: data.paymentMode?.value || "",
-          type: "deposit",
+          type: "advance",
           createdAt: currentTime,
         })
       }

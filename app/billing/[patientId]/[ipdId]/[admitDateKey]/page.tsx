@@ -1432,12 +1432,18 @@ export default function BillingPage() {
                                 name="serviceName"
                                 render={({ field }) => {
                                   // If the typed-in service is not in the array, create an object so CreatableSelect won't complain
+                                  const valueStr = field.value || ""
                                   const selectedOption = serviceOptions.find(
-                                    (option) => option.label.toLowerCase() === field.value.toLowerCase(),
+                                    (option) =>
+                                      typeof option.label === "string" &&
+                                      typeof valueStr === "string" &&
+                                      option.label.toLowerCase() === valueStr.toLowerCase(),
+                                    
                                   ) || {
-                                    label: field.value,
-                                    value: field.value,
+                                    label: valueStr,
+                                    value: valueStr,
                                   }
+                                  
 
                                   return (
                                     <CreatableSelect

@@ -566,7 +566,7 @@ export default function EditIPDPage() {
           amount: newDeposit - prevDeposit,
           date: new Date().toISOString(),
           paymentType: data.paymentMode?.value || "",
-          type: "deposit",
+          type: "advance",
           createdAt: new Date().toISOString(),
         })
       }
