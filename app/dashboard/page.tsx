@@ -1849,7 +1849,7 @@ const DashboardPage: React.FC = () => {
                 {patientAppointmentsLoading ? (
                   <div className="flex justify-center items-center p-12">
                     <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-sky-500"></div>
-                    <span className="ml-3 text-gray-600">Loading patient's appointments...</span>
+                    <span className="ml-3 text-gray-600">Loading patient appointments...</span>
                   </div>
                 ) : (
                   <>
