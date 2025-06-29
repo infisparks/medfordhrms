@@ -463,7 +463,7 @@ export default function CasualtyDetailPage() {
 
       const formattedNumber = casualtyRecord.phone.startsWith("91") ? casualtyRecord.phone : `91${casualtyRecord.phone}`
       const payload = {
-        token: "99583991572",
+        token: "99583991573",
         number: formattedNumber,
         imageUrl: downloadUrl,
         caption:

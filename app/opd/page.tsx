@@ -44,7 +44,7 @@ async function sendWhatsAppMessage(phone: string, message: string): Promise<bool
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        token: "99583991572",
+        token: "99583991573",
         number: phoneWithCountryCode,
         message: message,
       }),

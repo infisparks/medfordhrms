@@ -6,7 +6,6 @@ import { jsPDF } from "jspdf"
 import html2canvas from "html2canvas"
 import { Download } from "lucide-react"
 import letterhead from "@/public/letterhead.png"
-
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage"
 
 /** ========== Data model interfaces ========== **/
@@ -35,32 +34,22 @@ interface BillingRecord {
   amount: number
   roomType?: string
   bed?: string
-  // The key for displaying "Admit Date":
-  admitDate?: string // <--- We'll read this
-  createdAt?: string // fallback if needed
-  // Optionally, a custom time string from your Firebase data:
+  admitDate?: string
+  createdAt?: string
   time?: string
   services: ServiceItem[]
   payments: Payment[]
   discount?: number
 }
 
-/** ========== Component Props ========== **/
 type InvoiceDownloadProps = {
   record: BillingRecord
   children?: React.ReactNode
 }
 
-/**
- * InvoiceDownload
- *
- * Generates and downloads (or sends via WhatsApp) an invoice PDF
- * using a hidden off-screen layout.
- */
 export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
   const invoiceRef = useRef<HTMLDivElement>(null)
 
-  // Helper function to format ISO date strings into a readable date.
   const formatDate = (dateString: string) => {
     const options: Intl.DateTimeFormatOptions = {
       year: "numeric",
@@ -70,7 +59,6 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
     return new Date(dateString).toLocaleDateString(undefined, options)
   }
 
-  // Helper function to format a time portion from a date string.
   const formatTime = (dateString: string) => {
     return new Date(dateString).toLocaleTimeString(undefined, {
       hour: "2-digit",
@@ -78,21 +66,16 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
     })
   }
 
-  // Helper function to calculate days between two dates
   const calculateDaysBetween = (startDate: string, endDate: string | Date) => {
     const start = new Date(startDate)
     const end = endDate instanceof Date ? endDate : new Date(endDate)
-
-    // Reset time part to compare only dates
     start.setHours(0, 0, 0, 0)
     end.setHours(0, 0, 0, 0)
-
     const diffTime = Math.abs(end.getTime() - start.getTime())
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
     return diffDays
   }
 
-  // Helper function to convert a number to words.
   function convertNumberToWords(num: number): string {
     const a = [
       "",
@@ -141,14 +124,8 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
     )
   }
 
-  // Capture the bill date when rendering the invoice
   const billDate = new Date().toISOString()
 
-  /**
-   * generatePDF
-   *
-   * Renders the hidden invoice content into a PDF.
-   */
   const generatePDF = async (): Promise<jsPDF> => {
     if (!invoiceRef.current) throw new Error("Invoice element not found.")
     await new Promise((resolve) => setTimeout(resolve, 100))
@@ -196,7 +173,6 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
     return pdf
   }
 
-  // Download as PDF
   const handleDownloadInvoice = async () => {
     try {
       const pdf = await generatePDF()
@@ -210,7 +186,6 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
     }
   }
 
-  // Send PDF on WhatsApp
   const handleSendPdfOnWhatsapp = async () => {
     try {
       const pdf = await generatePDF()
@@ -223,7 +198,7 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
       const downloadUrl = await getDownloadURL(fileRef)
       const formattedNumber = record.mobileNumber.startsWith("91") ? record.mobileNumber : `91${record.mobileNumber}`
       const payload = {
-        token: "99583991572",
+        token: "99583991573",
         number: formattedNumber,
         imageUrl: downloadUrl,
         caption:
@@ -243,8 +218,6 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
       alert("An error occurred while sending the invoice PDF on WhatsApp.")
     }
   }
-
-  /** ========== Data & Layout Logic ========== **/
 
   // Group Hospital Services
   const groupedHospitalServices = Object.values(
@@ -319,12 +292,14 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
   const subtotal = hospitalServiceTotal + consultantChargeTotal
   const netTotal = subtotal - discount
   const deposit = record.amount
-  const dueAmount = netTotal - deposit // Can be negative now
+  const dueAmount = netTotal - deposit
 
   // Calculate day count
   const startDate = record.admitDate || record.createdAt || new Date().toISOString()
   const endDate = record.dischargeDate ? new Date(record.dischargeDate) : new Date()
   const dayCount = calculateDaysBetween(startDate, endDate)
+
+  const showConsultantTable = groupedConsultantServices.length > 0
 
   /** ========== Render ========== **/
   return (
@@ -350,12 +325,12 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
           position: "absolute",
           left: "-9999px",
           top: 0,
-          width: "595px",
+          width: "520px",
           backgroundColor: "transparent",
         }}
       >
-        <div className="text-xs text-gray-800 p-4 bg-transparent">
-          {/* Invoice Header: Patient Details & Dates */}
+        <div className="text-[10px] text-gray-800 p-2 bg-transparent max-w-[520px]">
+          {/* Header */}
           <div className="flex justify-between mb-2">
             <div>
               <p>
@@ -388,8 +363,7 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
               </p>
               {record.dischargeDate && (
                 <p>
-                  <strong>Discharge Date:</strong> {formatDate(record.dischargeDate)} /{" "}
-                  {formatTime(record.dischargeDate)}
+                  <strong>Discharge Date:</strong> {formatDate(record.dischargeDate)} / {formatTime(record.dischargeDate)}
                 </p>
               )}
               <p>
@@ -398,49 +372,51 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
             </div>
           </div>
 
-          {/* Consultant Charges Table */}
-          <div className="my-4">
-            <h3 className="font-semibold mb-2 text-xs">Consultant Charges</h3>
-            <table className="w-full text-[8px]">
-              <thead>
-                <tr className="bg-green-100">
-                  <th className="p-1 text-left">Doctor Name</th>
-                  <th className="p-1 text-center">Visited</th>
-                  <th className="p-1 text-right">Unit (Rs)</th>
-                  <th className="p-1 text-right">Total (Rs)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {groupedConsultantServices.map((item, idx) => (
-                  <tr key={idx} className="border-t">
-                    <td className="p-1">{item.doctorName}</td>
-                    <td className="p-1 text-center">{item.quantity}</td>
-                    <td className="p-1 text-right">{item.unitAmount.toLocaleString()}</td>
-                    <td className="p-1 text-right">{item.totalAmount.toLocaleString()}</td>
+          {/* Consultant Charges Table (Conditional) */}
+          {showConsultantTable && (
+            <div className="my-2">
+              <h3 className="font-semibold mb-1 text-[10px]">Consultant Charges</h3>
+              <table className="w-full text-[7px] max-w-[520px]">
+                <thead>
+                  <tr className="bg-green-100">
+                    <th className="p-1 text-left min-w-[70px]">Doctor Name</th>
+                    <th className="p-1 text-center w-[25px]">Visited</th>
+                    <th className="p-1 text-right w-[40px]">Unit (Rs)</th>
+                    <th className="p-1 text-right w-[50px]">Total (Rs)</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="mt-1 text-right font-semibold text-xs">
-              Consultant Charges Total: Rs. {consultantChargeTotal.toLocaleString()}
+                </thead>
+                <tbody>
+                  {groupedConsultantServices.map((item, idx) => (
+                    <tr key={idx}>
+                      <td className="p-1">{item.doctorName}</td>
+                      <td className="p-1 text-center">{item.quantity}</td>
+                      <td className="p-1 text-right">{item.unitAmount.toLocaleString()}</td>
+                      <td className="p-1 text-right">{item.totalAmount.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="mt-1 text-right font-semibold text-[9px]">
+                Consultant Charges Total: Rs. {consultantChargeTotal.toLocaleString()}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Hospital Service Charges Table */}
           <div className="my-2">
-            <h3 className="font-semibold mb-2 text-xs">Hospital Service Charges</h3>
-            <table className="w-full text-[8px]">
+            <h3 className="font-semibold mb-1 text-[10px]">Hospital Service Charges</h3>
+            <table className="w-full text-[7px] max-w-[520px]">
               <thead>
                 <tr className="bg-green-100">
-                  <th className="p-1 text-left">Service</th>
-                  <th className="p-1 text-center">Qnty</th>
-                  <th className="p-1 text-right">Unit (Rs)</th>
-                  <th className="p-1 text-right">Total (Rs)</th>
+                  <th className="p-1 text-left min-w-[100px]">Service</th>
+                  <th className="p-1 text-center w-[25px]">Qnty</th>
+                  <th className="p-1 text-right w-[40px]">Unit (Rs)</th>
+                  <th className="p-1 text-right w-[50px]">Total (Rs)</th>
                 </tr>
               </thead>
               <tbody>
                 {groupedHospitalServices.map((item, idx) => (
-                  <tr key={idx} className="border-t">
+                  <tr key={idx}>
                     <td className="p-1">{item.serviceName}</td>
                     <td className="p-1 text-center">{item.quantity}</td>
                     <td className="p-1 text-right">{item.unitAmount.toLocaleString()}</td>
@@ -449,13 +425,13 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
                 ))}
               </tbody>
             </table>
-            <div className="mt-1 text-right font-semibold text-xs">
+            <div className="mt-1 text-right font-semibold text-[9px]">
               Hospital Services Total: Rs. {hospitalServiceTotal.toLocaleString()}
             </div>
           </div>
 
           {/* Final Summary Section */}
-          <div className="mt-4 p-2 rounded text-[9px] w-[200px] ml-auto">
+          <div className="mt-2 p-1 rounded text-[8px] w-[200px] ml-auto">
             <p className="flex justify-between w-full">
               <span>Total Amount:</span>
               <span>Rs. {subtotal.toLocaleString()}</span>
@@ -475,19 +451,23 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
               <span>Deposit Amount:</span>
               <span>Rs. {deposit.toLocaleString()}</span>
             </p>
-            <p className={`flex justify-between w-full font-bold ${dueAmount < 0 ? "text-blue-600" : "text-red-600"}`}>
+            <p
+              className={`flex justify-between w-full font-semibold text-[8px] ${
+                dueAmount < 0 ? "text-blue-600" : "text-red-600"
+              }`}
+            >
               <span>{dueAmount < 0 ? "Refund Amount:" : "Due Amount:"}</span>
               <span>
                 {dueAmount < 0 ? "Rs. " + Math.abs(dueAmount).toLocaleString() : "Rs. " + dueAmount.toLocaleString()}
               </span>
             </p>
             {dueAmount > 0 && (
-              <p className="mt-1 text-xs ">
+              <p className="mt-1 text-[8px] ">
                 <strong>Due Amount in Words:</strong> {convertNumberToWords(dueAmount)} Rupees Only
               </p>
             )}
             {dueAmount < 0 && (
-              <p className="mt-1 text-xs text-black">
+              <p className="mt-1 text-[8px] text-black">
                 <strong>Refund Amount in Words:</strong> {convertNumberToWords(Math.abs(dueAmount))} Rupees Only
               </p>
             )}

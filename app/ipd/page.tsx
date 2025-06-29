@@ -505,7 +505,7 @@ const IPDBookingPage: React.FC = () => {
 ------------------------------------------------------------------ */
   const sendWhatsAppMessage = async (number: string, message: string) => {
     const payload = {
-      token: "99583991572",
+      token: "99583991573",
       number: `91${number}`,
       message,
     }

@@ -137,7 +137,7 @@ Medford Hospital
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              token: "99583991572",
+              token: "99583991573",
               number: phoneWithCountryCode,
               message: professionalMessage,
             }),
