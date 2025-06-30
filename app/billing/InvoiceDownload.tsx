@@ -378,7 +378,7 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
               <h3 className="font-semibold mb-1 text-[10px]">Consultant Charges</h3>
               <table className="w-full text-[7px] max-w-[520px]">
                 <thead>
-                  <tr className="bg-green-100">
+                  <tr className="bg-blue-100">
                     <th className="p-1 text-left min-w-[70px]">Doctor Name</th>
                     <th className="p-1 text-center w-[25px]">Visited</th>
                     <th className="p-1 text-right w-[40px]">Unit (Rs)</th>
@@ -407,7 +407,7 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
             <h3 className="font-semibold mb-1 text-[10px]">Hospital Service Charges</h3>
             <table className="w-full text-[7px] max-w-[520px]">
               <thead>
-                <tr className="bg-green-100">
+                <tr className="bg-blue-100">
                   <th className="p-1 text-left min-w-[100px]">Service</th>
                   <th className="p-1 text-center w-[25px]">Qnty</th>
                   <th className="p-1 text-right w-[40px]">Unit (Rs)</th>

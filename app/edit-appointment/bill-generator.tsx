@@ -54,7 +54,7 @@ export function BillGenerator({
     }
 
     // Show date/time on top-right
-    let yPos = 48
+    let yPos = 55
     doc.setFontSize(9)
     doc.setFont("helvetica", "normal")
     doc.text(
