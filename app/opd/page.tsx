@@ -94,7 +94,7 @@ For any queries, please contact our reception.
 
 Thank you for choosing our healthcare services!
 
-*Gautami Medford NX *`
+* Medford Hospsital *`
   } else {
     // Hospital visit message
     const modalities = data.modalities || []
