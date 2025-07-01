@@ -452,6 +452,7 @@ const AdminDoctorsPage: React.FC = () => {
     "Gastroenterology",
     "Ophthalmology",
     "ENT",
+    "Radiology",
     "Urology",
     "Onco - Physician",
     "Pediatric Surgery",
