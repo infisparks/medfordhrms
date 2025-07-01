@@ -1,9 +1,11 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useEffect, useCallback } from "react"
 import { db } from "@/lib/firebase"
 import { eachDayOfInterval } from "date-fns"
-import { ref, query, get } from "firebase/database"
+import { ref, query, get, remove } from "firebase/database" // Import remove
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
 import { Input } from "@/components/ui/input"
@@ -15,12 +17,15 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { EditButton } from "./edit-button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Calendar, RefreshCw, Eye, ArrowUpDown, X, Filter } from "lucide-react"
+import { Calendar, RefreshCw, Eye, ArrowUpDown, X, Filter, Trash2, AlertCircle, Users } from "lucide-react"
+import { ToastContainer, toast } from "react-toastify" // Ensure ToastContainer is imported
+import "react-toastify/dist/ReactToastify.css" // Ensure CSS is imported
 
 // === Helpers for download size ===
 function byteSize(str: string) {
   return new Blob([str]).size
 }
+
 function humanFileSize(bytes: number) {
   if (bytes < 1024) return bytes + " B"
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB"
@@ -34,9 +39,9 @@ interface Appointment {
   phone: string
   date: string
   time: string
-  doctor?: string
+  doctor?: string // This is the main consulting doctor, not necessarily from modalities
   appointmentType: string
-  modalities: any[]
+  modalities: any[] // Modalities can contain doctor info for consultation type
   createdAt: string
   payment?: {
     totalCharges: number
@@ -61,7 +66,7 @@ const flattenAppointments = (snap: Record<string, any> | null | undefined, filte
           phone: data.phone || "",
           date: data.date || "",
           time: data.time || "",
-          doctor: data.doctor || "",
+          doctor: data.doctor || "", // Main consulting doctor
           appointmentType: data.appointmentType || "visithospital",
           modalities: data.modalities || [],
           createdAt: data.createdAt || "",
@@ -71,9 +76,9 @@ const flattenAppointments = (snap: Record<string, any> | null | undefined, filte
             discount: 0,
             paymentMethod: "cash",
           },
-        };
+        }
         if (filterFn(appointmentData)) {
-          result.push(appointmentData);
+          result.push(appointmentData)
         }
       })
     }
@@ -83,8 +88,8 @@ const flattenAppointments = (snap: Record<string, any> | null | undefined, filte
 
 export default function ManageOPDPage() {
   const router = useRouter()
-  const [tab, setTab] = useState<"today" | "last7days">("today")
-  const [appointments, setAppointments] = useState<Appointment[]>([])
+  const [activeFilterTab, setActiveFilterTab] = useState<string>("today") // Can be "today" or a doctor's name
+  const [appointments, setAppointments] = useState<Appointment[]>([]) // All today's appointments
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [searching, setSearching] = useState(false)
@@ -95,11 +100,21 @@ export default function ManageOPDPage() {
   })
   const [downloadedCount, setDownloadedCount] = useState(0)
   const [downloadedBytes, setDownloadedBytes] = useState(0)
+  const [doctorTabs, setDoctorTabs] = useState<{ name: string; count: number }[]>([])
 
-  // Fetch only today's data by default
+  // State for deletion modal
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deletePassword, setDeletePassword] = useState("")
+  const [deleteError, setDeleteError] = useState("")
+  const [appointmentToDelete, setAppointmentToDelete] = useState<Appointment | null>(null)
+
+  // Fetch only today's data
   const fetchTodayAppointments = useCallback(async () => {
     setIsLoading(true)
     setError(null)
+    setSearchTerm("") // Clear search term when fetching new data
+    setActiveFilterTab("today") // Reset active filter tab
+
     try {
       const todayKey = getTodayDateKey()
       const opdRef = ref(db, `patients/opddetail/${todayKey}`)
@@ -109,55 +124,28 @@ export default function ManageOPDPage() {
       setAppointments(result)
       setDownloadedCount(result.length)
       setDownloadedBytes(byteSize(JSON.stringify(data || {})))
+
+      // Calculate doctor consultation counts for dynamic tabs based on modalities
+      const doctorCounts: { [key: string]: number } = {}
+      result.forEach((app) => {
+        if (app.appointmentType === "visithospital" && app.modalities && Array.isArray(app.modalities)) {
+          app.modalities.forEach((modality) => {
+            if (modality.type === "consultation" && modality.doctor) {
+              doctorCounts[modality.doctor] = (doctorCounts[modality.doctor] || 0) + 1
+            }
+          })
+        }
+      })
+      const sortedDoctors = Object.entries(doctorCounts)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+      setDoctorTabs(sortedDoctors)
     } catch (err) {
       setError("Failed to load today's appointments")
       setAppointments([])
       setDownloadedCount(0)
       setDownloadedBytes(0)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
-
-  // Fetch last 7 days data
-  const fetchLast7DaysAppointments = useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const today = new Date()
-      const sixDaysAgo = new Date()
-      sixDaysAgo.setDate(today.getDate() - 6)
-
-      const days = eachDayOfInterval({ start: sixDaysAgo, end: today })
-
-      const fetches = days.map((day) => {
-        const dateKey = format(day, "yyyy-MM-dd")
-        const opdRef = ref(db, `patients/opddetail/${dateKey}`)
-        return get(query(opdRef)).then((snap) => ({
-          data: snap.val() as Record<string, any> | null,
-          dateKey,
-        }))
-      })
-
-      const snaps = await Promise.all(fetches)
-
-      let allResults: Appointment[] = []
-      let totalBytes = 0
-      for (const { data } of snaps) {
-        if (data) {
-          allResults = allResults.concat(flattenAppointments(data, () => true))
-          totalBytes += byteSize(JSON.stringify(data))
-        }
-      }
-
-      setAppointments(allResults)
-      setDownloadedCount(allResults.length)
-      setDownloadedBytes(totalBytes)
-    } catch (err) {
-      setError("Failed to load last 7 days' appointments")
-      setAppointments([])
-      setDownloadedCount(0)
-      setDownloadedBytes(0)
+      setDoctorTabs([])
     } finally {
       setIsLoading(false)
     }
@@ -168,11 +156,9 @@ export default function ManageOPDPage() {
     const results: Appointment[] = []
     let totalBytes = 0
     const t = term.toLowerCase()
-
     const today = new Date()
     const ninetyDaysAgo = new Date()
     ninetyDaysAgo.setDate(today.getDate() - 89)
-
     const daysToFetch = eachDayOfInterval({ start: ninetyDaysAgo, end: today })
 
     const fetches = daysToFetch.map((day) => {
@@ -193,12 +179,13 @@ export default function ManageOPDPage() {
           (a) =>
             (a.name || "").toLowerCase().includes(t) ||
             (a.phone || "").includes(t) ||
-            (a.patientId || "").toLowerCase().includes(t) // Added search by patientId (UHID)
+            (a.patientId || "").toLowerCase().includes(t), // Added search by patientId (UHID)
         )
         results.push(...filtered)
         totalBytes += byteSize(JSON.stringify(data))
       }
     }
+
     setDownloadedCount(results.length)
     setDownloadedBytes(totalBytes)
     return results
@@ -212,7 +199,9 @@ export default function ManageOPDPage() {
         setError(null)
         try {
           const historicalResults = await fetchHistoricalAppointments(searchTerm)
-          setAppointments(historicalResults)
+          setAppointments(historicalResults) // Update main appointments state with search results
+          setDoctorTabs([]) // Clear doctor tabs when in search mode
+          setActiveFilterTab("today") // Keep "today" tab active visually for search results
         } catch (err) {
           setError("Failed to search historical appointments")
           setAppointments([])
@@ -222,46 +211,120 @@ export default function ManageOPDPage() {
           setSearching(false)
         }
       } else {
-        // If search term is too short, revert to tab-based data
+        // If search term is too short, revert to today's data
         setSearching(false)
         setError(null)
-        if (tab === "today") {
-          fetchTodayAppointments()
-        } else {
-          fetchLast7DaysAppointments()
-        }
+        fetchTodayAppointments() // Re-fetch today's data and re-populate doctor tabs
       }
     }, 500)
+
     return () => clearTimeout(timeout)
-  }, [searchTerm, tab, fetchTodayAppointments, fetchLast7DaysAppointments, fetchHistoricalAppointments])
+  }, [searchTerm, fetchTodayAppointments, fetchHistoricalAppointments])
 
-  // Initial load or tab change
+  // Initial load
   useEffect(() => {
-    setSearchTerm("") // Clear search term on tab change
-    if (tab === "today") fetchTodayAppointments()
-    else fetchLast7DaysAppointments()
-  }, [tab, fetchTodayAppointments, fetchLast7DaysAppointments])
+    fetchTodayAppointments()
+  }, [fetchTodayAppointments])
 
-  // Sorting
-  const sortedAppointments = [...appointments].sort((a, b) => {
-    const { key, direction } = sortConfig
-    if (key === "date") {
-      const da = new Date(a.date).getTime()
-      const db = new Date(b.date).getTime()
-      return direction === "asc" ? da - db : db - da
+  // Filtering based on activeFilterTab and searchTerm
+  const filteredAndSortedAppointments = [...appointments]
+    .filter((app) => {
+      // Apply doctor filter if activeFilterTab is a doctor's name
+      if (activeFilterTab !== "today") {
+        // Check if any modality is a consultation by the selected doctor
+        const hasConsultationByDoctor = app.modalities.some(
+          (modality) => modality.type === "consultation" && modality.doctor === activeFilterTab,
+        )
+        if (!hasConsultationByDoctor) {
+          return false
+        }
+      }
+      // Apply search term filter
+      const term = searchTerm.trim().toLowerCase()
+      if (term.length >= 6) {
+        return (
+          (app.name || "").toLowerCase().includes(term) ||
+          (app.phone || "").includes(term) ||
+          (app.patientId || "").toLowerCase().includes(term)
+        )
+      }
+      return true
+    })
+    .sort((a, b) => {
+      const { key, direction } = sortConfig
+      if (key === "date") {
+        const da = new Date(a.date).getTime()
+        const db = new Date(b.date).getTime()
+        return direction === "asc" ? da - db : db - da
+      }
+      // Handle sorting for patientId, name, phone
+      if (key === "name" || key === "phone" || key === "patientId") {
+        const va = (a as any)[key] || ""
+        const vb = (b as any)[key] || ""
+        return direction === "asc" ? va.localeCompare(vb) : vb.localeCompare(va)
+      }
+      return 0
+    })
+
+  // Handle delete button click
+  const handleDeleteAppointment = (e: React.MouseEvent, app: Appointment) => {
+    e.stopPropagation()
+    setAppointmentToDelete(app)
+    setDeletePassword("")
+    setDeleteError("")
+    setShowDeleteModal(true)
+  }
+
+  // Confirm deletion after password input
+  const confirmDeleteAppointment = async () => {
+    if (deletePassword !== "medford@786") {
+      setDeleteError("Incorrect password.")
+      return
     }
-    // Handle sorting for patientId, name, phone
-    if (key === "name" || key === "phone" || key === "patientId") {
-      const va = (a as any)[key] || "";
-      const vb = (b as any)[key] || "";
-      return direction === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+
+    if (!appointmentToDelete) {
+      setDeleteError("No appointment selected for deletion.")
+      return
     }
-    return 0
-  })
+
+    setIsLoading(true) // Show loading state during deletion
+    try {
+      const { patientId, id: appointmentId, date, appointmentType } = appointmentToDelete
+      const dateKey = format(new Date(date), "yyyy-MM-dd")
+
+      // 1. Delete from patients/opddetail/{dateKey}/{uhid}/{appointmentId}
+      await remove(ref(db, `patients/opddetail/${dateKey}/${patientId}/${appointmentId}`))
+
+      // 2. If it's an on-call appointment, delete from oncall-appointments/{appointmentId}
+      if (appointmentType === "oncall") {
+        await remove(ref(db, `oncall-appointments/${appointmentId}`))
+      }
+
+      toast.success("Appointment cancelled and records deleted successfully!", {
+        position: "top-right",
+        autoClose: 5000,
+      })
+      setShowDeleteModal(false)
+      setAppointmentToDelete(null)
+      setDeletePassword("")
+      setDeleteError("")
+      fetchTodayAppointments() // Re-fetch data to update the list
+    } catch (error) {
+      console.error("Error cancelling appointment:", error)
+      toast.error("Failed to cancel appointment.", {
+        position: "top-right",
+        autoClose: 5000,
+      })
+      setDeleteError("An error occurred during cancellation.")
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   return (
     <TooltipProvider>
       <div className="min-h-screen bg-slate-50">
+        <ToastContainer /> {/* ToastContainer for notifications */}
         <div className="bg-white shadow-sm border-b sticky top-0 z-10">
           <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -289,11 +352,7 @@ export default function ManageOPDPage() {
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant="default"
-                    onClick={() => (tab === "today" ? fetchTodayAppointments() : fetchLast7DaysAppointments())}
-                    disabled={isLoading}
-                  >
+                  <Button variant="default" onClick={fetchTodayAppointments} disabled={isLoading}>
                     <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
                     Refresh
                   </Button>
@@ -303,14 +362,18 @@ export default function ManageOPDPage() {
             </div>
           </div>
         </div>
-
         <div className="max-w-7xl mx-auto px-4 py-8">
-          <Tabs value={tab} onValueChange={(v) => setTab(v as "today" | "last7days")} className="w-full mb-4">
-            <TabsList className="bg-slate-100">
+          <Tabs value={activeFilterTab} onValueChange={setActiveFilterTab} className="w-full mb-4">
+            <TabsList className="bg-slate-100 overflow-x-auto whitespace-nowrap">
               <TabsTrigger value="today">Today</TabsTrigger>
-              <TabsTrigger value="last7days">Last 7 Days</TabsTrigger>
+              {doctorTabs.map((doctor) => (
+                <TabsTrigger key={doctor.name} value={doctor.name}>
+                  Dr. {doctor.name} ({doctor.count})
+                </TabsTrigger>
+              ))}
             </TabsList>
           </Tabs>
+
           <Card className="mb-6 border border-slate-200 shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">
@@ -345,18 +408,28 @@ export default function ManageOPDPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Calendar className="h-4 w-4" />
-                {tab === "today" ? "Today's Appointments" : "Last 7 Days' Appointments"}
+                {activeFilterTab === "today" ? "Today's Appointments" : `Appointments for Dr. ${activeFilterTab}`}
               </CardTitle>
               <CardDescription>
-                {appointments.length ? `${appointments.length} found` : isLoading ? "Loading..." : "No appointments"}
+                {filteredAndSortedAppointments.length
+                  ? `${filteredAndSortedAppointments.length} found`
+                  : isLoading
+                    ? "Loading..."
+                    : "No appointments"}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {isLoading ? (
+              {isLoading && !searching ? ( // Show skeleton only when initial loading or refreshing, not during search
                 <div className="space-y-2">
                   {Array.from({ length: 6 }).map((_, i) => (
                     <Skeleton key={i} className="h-16 w-full" />
                   ))}
+                </div>
+              ) : filteredAndSortedAppointments.length === 0 ? (
+                <div className="text-center py-12 bg-slate-50 rounded-lg border border-slate-200">
+                  <Users className="h-12 w-12 text-slate-300 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-slate-700 mb-1">No appointments found</h3>
+                  <p className="text-slate-500">Try adjusting your filters or search criteria</p>
                 </div>
               ) : (
                 <div className="rounded-md border overflow-hidden">
@@ -378,7 +451,10 @@ export default function ManageOPDPage() {
                           <Button
                             variant="ghost"
                             onClick={() =>
-                              setSortConfig({ key: "patientId", direction: sortConfig.direction === "asc" ? "desc" : "asc" })
+                              setSortConfig({
+                                key: "patientId",
+                                direction: sortConfig.direction === "asc" ? "desc" : "asc",
+                              })
                             }
                             className="flex items-center gap-1 p-0 h-auto font-medium"
                           >
@@ -392,15 +468,13 @@ export default function ManageOPDPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {sortedAppointments.map((app) => (
+                      {filteredAndSortedAppointments.map((app) => (
                         <TableRow key={`${app.patientId}-${app.id}`} className="hover:bg-slate-50">
                           <TableCell className="font-medium">
                             {app.name}
                             <div className="text-xs text-gray-500">{app.phone}</div>
                           </TableCell>
-                          <TableCell className="text-sm text-gray-600 font-mono">
-                            {app.patientId}
-                          </TableCell>
+                          <TableCell className="text-sm text-gray-600 font-mono">{app.patientId}</TableCell>
                           <TableCell>{format(new Date(app.date), "dd/MM/yyyy")}</TableCell>
                           <TableCell>
                             <Badge variant={app.appointmentType === "visithospital" ? "default" : "secondary"}>
@@ -431,6 +505,18 @@ export default function ManageOPDPage() {
                                 </TooltipTrigger>
                                 <TooltipContent>Edit</TooltipContent>
                               </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="destructive"
+                                    size="icon"
+                                    onClick={(e) => handleDeleteAppointment(e, app)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Delete Appointment</TooltipContent>
+                              </Tooltip>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -443,6 +529,67 @@ export default function ManageOPDPage() {
           </Card>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && appointmentToDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+            <div className="flex justify-between items-center mb-4 border-b pb-4">
+              <h3 className="text-xl font-semibold text-red-700 flex items-center">
+                <Trash2 className="h-6 w-6 mr-2" />
+                Confirm Deletion
+              </h3>
+              <button onClick={() => setShowDeleteModal(false)} className="text-gray-500 hover:text-gray-700">
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+            <p className="text-gray-700 mb-4">
+              Are you sure you want to delete the appointment for{" "}
+              <span className="font-semibold">{appointmentToDelete.name}</span> (UHID:{" "}
+              <span className="font-semibold">{appointmentToDelete.patientId}</span>)?
+              <br />
+              This action will permanently remove this appointment record.
+            </p>
+            <div className="mb-4">
+              <label htmlFor="delete-password" className="block text-sm font-medium text-gray-700 mb-1">
+                Enter Password to Confirm:
+              </label>
+              <Input
+                id="delete-password"
+                type="password"
+                value={deletePassword}
+                onChange={(e) => {
+                  setDeletePassword(e.target.value)
+                  setDeleteError("") // Clear error on input change
+                }}
+                placeholder="Enter password"
+                className={deleteError ? "border-red-500" : ""}
+              />
+              {deleteError && (
+                <p className="text-red-500 text-sm mt-1 flex items-center">
+                  <AlertCircle className="h-4 w-4 mr-1" />
+                  {deleteError}
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setShowDeleteModal(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={confirmDeleteAppointment} disabled={isLoading}>
+                {isLoading ? (
+                  <>
+                    <div className="mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete Appointment"
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </TooltipProvider>
   )
 }

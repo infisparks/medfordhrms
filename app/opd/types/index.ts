@@ -1,3 +1,11 @@
+// export type PaymentMethod = "cash" | "online" | "mixed" | "card-credit" | "card-debit" // Added card-credit and card-debit
+
+export type AppointmentType = "visithospital" | "oncall"
+
+export type Gender = "male" | "female" | "other"
+
+export type AgeUnit = "years" | "months" | "days" // New type for age unit
+
 export interface IFormInput {
   name: string
   phone: string
@@ -6,9 +14,10 @@ export interface IFormInput {
   address?: string
   date: Date
   time: string
-  uhid?: string 
+  ageUnit: AgeUnit // Added ageUnit
+  uhid?: string
   message?: string
-  paymentMethod: "cash" | "online" | "mixed"
+  paymentMethod: "cash" | "online" | "mixed" | "card-credit" | "card-debit" // Updated
   cashAmount?: number
   onlineAmount?: number
   discount?: number
@@ -24,15 +33,14 @@ export interface IFormInput {
 
 export interface ModalitySelection {
   id: string
-  type: "consultation" | "casualty" | "xray" | "pathology" | "ipd" | "radiology" | "custom"
-  doctor?: string
-  specialist?: string
-  visitType?: "first" | "followup"
-  service?: string
-  study?: string
+  type: "consultation" | "xray" | "pathology" | "ipd" | "radiology" | "casualty" | "custom" | "cardiology" // Added cardiology
   charges: number
+  specialist?: string // For consultation
+  doctor?: string // Doctor ID for consultation or custom service
+  visitType?: "first" | "followup" // For consultation
+  service?: string // For xray, pathology, ipd, radiology, casualty, custom, cardiology
+  study?: string // Alias for service, used in some contexts
 }
-
 
 export interface PatientRecord {
   id: string
@@ -93,10 +101,14 @@ export interface ServiceOption {
   amount: number
 }
 
+export type PaymentMethod = "cash" | "online" | "mixed" | "card-credit" | "card-debit"
+
 export const PaymentOptions = [
-  { value: "cash", label: "Cash" },
-  { value: "online", label: "Online" },
-  { value: "mixed", label: "Cash + Online" },
+  { label: "Cash", value: "cash" },
+  { label: "Online", value: "online" },
+  { label: "Card (Credit)", value: "card-credit" }, // Added
+  { label: "Card (Debit)", value: "card-debit" }, // Added
+  { label: "Mixed (Cash + Online)", value: "mixed" },
 ]
 
 export const GenderOptions = [
@@ -107,19 +119,30 @@ export const GenderOptions = [
 
 export const ModalityOptions = [
   { value: "consultation", label: "Consultation", baseCharge: 0 },
-  { value: "casualty",     label: "Casualty",     baseCharge: 500 },
-  { value: "xray",         label: "X-Ray",         baseCharge: 300 },
-  { value: "pathology",    label: "Pathology",     baseCharge: 200 },
-  { value: "ipd",          label: "IPD",           baseCharge: 1000 },
-  { value: "radiology",    label: "Radiology",     baseCharge: 800 },
+  { value: "casualty", label: "Casualty", baseCharge: 500 },
+  { value: "xray", label: "X-Ray", baseCharge: 300 },
+  { value: "pathology", label: "Pathology", baseCharge: 200 },
+  { value: "ipd", label: "IPD", baseCharge: 1000 },
+  { value: "radiology", label: "Radiology", baseCharge: 800 },
+  { label: "Cardiology", value: "cardiology", baseCharge: 0 },
   { value: "custom", label: "Custom Service", baseCharge: 0 },
+]
 
+export const AgeUnitOptions = [
+  { value: "years", label: "Years" },
+  { value: "months", label: "Months" },
+  { value: "days", label: "Days" },
 ]
 
 export const VisitTypeOptions = [
   { value: "first", label: "First Visit" },
   { value: "followup", label: "Follow Up" },
 ]
+
+export const CardiologyStudyOptions = [
+  { service: "2DECO", amount: 1800 },
+  { service: "2DECO WITH CONSULTATION", amount: 3500 },
+ ]
 
 export const XRayStudyOptions: ServiceOption[] = [
   { service: "CHEST PA", amount: 300 },
@@ -166,7 +189,7 @@ export const XRayStudyOptions: ServiceOption[] = [
   { service: "2D ECHO OPD with Consultation", amount: 1500 },
   { service: "2D ECHO IPD with Consultation", amount: 1800 },
   { service: "2D ECHO OPD without Consultation", amount: 1200 },
-  { service: "2D ECHO IPD without Consultation", amount: 1500 }
+  { service: "2D ECHO IPD without Consultation", amount: 1500 },
 ]
 
 export const PathologyStudyOptions: ServiceOption[] = [
@@ -438,7 +461,7 @@ export const PathologyStudyOptions: ServiceOption[] = [
   { service: "HISTOPATH - Small Sample", amount: 1200 },
   { service: "HISTOPATH - Medium Sample", amount: 1800 },
   { service: "HISTOPATH - Large Sample", amount: 2500 },
-  { service: "LIPASE", amount: 600 }
+  { service: "LIPASE", amount: 600 },
 ]
 
 export const IPDServiceOptions: ServiceOption[] = [
@@ -489,7 +512,7 @@ export const IPDServiceOptions: ServiceOption[] = [
   { service: "FOLLICULAR STUDY", amount: 1200 },
   { service: "USG - NT Scan - twin", amount: 1800 },
   { service: "USG - Follicle Study", amount: 1200 },
-  { service: "USG - Bilateral", amount: 1000 }
+  { service: "USG - Bilateral", amount: 1000 },
 ]
 
 export const RadiologyServiceOptions: ServiceOption[] = [
@@ -516,9 +539,8 @@ export const RadiologyServiceOptions: ServiceOption[] = [
   { service: "FNAC - Dr. Noman/Dr. Salman", amount: 1800 },
   { service: "Mammography - Dr. Noman/Dr. Salman", amount: 2500 },
   { service: "FNAC - DR SHOEB ANSARI", amount: 1800 },
-  { service: "MAMMOGRAPHY - DR SHOEB ANSARI", amount: 2500 }
+  { service: "MAMMOGRAPHY - DR SHOEB ANSARI", amount: 2500 },
 ]
-
 
 export const Casualty: ServiceOption[] = [
   { service: "Room Charges/Nursing Charges", amount: 200 },
@@ -561,30 +583,30 @@ export const Casualty: ServiceOption[] = [
   { service: "Dialysis Bed - Dr Shakil Shaikh", amount: 0 },
   { service: "Dialysis Bed - Dr Nikhil Shinde", amount: 0 },
   { service: "Dialysis Bed - Dr Sameer Vyahalkar", amount: 0 },
-  { service: "Slab  Below Knee", amount: 0 },
-  { service: "Slab  Below Elbow", amount: 0 },
-  { service: "Slab  Above Knee", amount: 0 },
-  { service: "Slab  Above Elbow", amount: 0 },
-  { service: "POP Cast  Below Knee", amount: 0 },
-  { service: "POP Cast  Below Elbow", amount: 0 },
-  { service: "POP Cast  Above Knee", amount: 0 },
-  { service: "POP Cast  Above Elbow", amount: 0 },
+  { service: "Slab  Below Knee", amount: 0 },
+  { service: "Slab  Below Elbow", amount: 0 },
+  { service: "Slab  Above Knee", amount: 0 },
+  { service: "Slab  Above Elbow", amount: 0 },
+  { service: "POP Cast  Below Knee", amount: 0 },
+  { service: "POP Cast  Below Elbow", amount: 0 },
+  { service: "POP Cast  Above Knee", amount: 0 },
+  { service: "POP Cast  Above Elbow", amount: 0 },
   { service: "Registration Charges - Ward", amount: 0 },
   { service: "Registration Charges -ICU", amount: 0 },
   { service: "Registration Charges -NICU", amount: 0 },
   { service: "Registration Charges -T.S", amount: 0 },
   { service: "Registration Charges -Delux", amount: 0 },
-  { service: "ICU -  Bed / Nursing", amount: 0 },
-  { service: "GW  - Female -  Bed / Nursing", amount: 0 },
-  { service: "GW  - Male -  Bed / Nursing", amount: 0 },
-  { service: "GW  - Paediatric  Bed / Nursing", amount: 0 },
-  { service: "GW  - Maternity  Bed / Nursing", amount: 0 },
+  { service: "ICU -  Bed / Nursing", amount: 0 },
+  { service: "GW  - Female -  Bed / Nursing", amount: 0 },
+  { service: "GW  - Male -  Bed / Nursing", amount: 0 },
+  { service: "GW  - Paediatric  Bed / Nursing", amount: 0 },
+  { service: "GW  - Maternity  Bed / Nursing", amount: 0 },
   { service: "GW-Mother Bed", amount: 0 },
-  { service: "NICU -  Bed / Nursing", amount: 0 },
-  { service: "Deluxe -  Bed / Nursing", amount: 0 },
-  { service: "Twin Sharing -  Bed / Nursing", amount: 0 },
-  { service: "Suite Room -  Bed / Nursing", amount: 0 },
-  { service: "Suite Room -  Bed / Nursing With Consultant", amount: 0 },
+  { service: "NICU -  Bed / Nursing", amount: 0 },
+  { service: "Deluxe -  Bed / Nursing", amount: 0 },
+  { service: "Twin Sharing -  Bed / Nursing", amount: 0 },
+  { service: "Suite Room -  Bed / Nursing", amount: 0 },
+  { service: "Suite Room -  Bed / Nursing With Consultant", amount: 0 },
   { service: "Consultant - GW", amount: 0 },
   { service: "Consultant - ICU", amount: 0 },
   { service: "Consultant - NICU", amount: 0 },
@@ -685,6 +707,5 @@ export const Casualty: ServiceOption[] = [
   { service: "Induction Charges", amount: 0 },
   { service: "Implant", amount: 0 },
   { service: "Dialysis Amount", amount: 0 },
-  { service: "CMO Emergency Charges", amount: 0 }
-  ]
-
+  { service: "CMO Emergency Charges", amount: 0 },
+]

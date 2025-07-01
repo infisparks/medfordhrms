@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+
 import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { db, auth } from "@/lib/firebase"
@@ -14,6 +15,7 @@ import { useRouter } from "next/navigation"
 
 import { PatientForm } from "./patient-form"
 import { OnCallAppointments } from "./oncall-appointments"
+
 import type { IFormInput, PatientRecord, Doctor, ModalitySelection, OnCallAppointment } from "./types"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -24,20 +26,15 @@ function formatAMPM(date: Date): string {
   const rawHours = date.getHours()
   const rawMinutes = date.getMinutes()
   const ampm = rawHours >= 12 ? "PM" : "AM"
-
   const hours = rawHours % 12 || 12
   const minutesStr = rawMinutes < 10 ? `0${rawMinutes}` : rawMinutes.toString()
-
   return `${hours}:${minutesStr} ${ampm}`
 }
-
-// Removed the old generatePatientId function
 
 // WhatsApp message sending function
 async function sendWhatsAppMessage(phone: string, message: string): Promise<boolean> {
   try {
     const phoneWithCountryCode = `91${phone.replace(/\D/g, "")}`
-
     const response = await fetch("https://wa.medblisss.com/send-text", {
       method: "POST",
       headers: {
@@ -49,7 +46,6 @@ async function sendWhatsAppMessage(phone: string, message: string): Promise<bool
         message: message,
       }),
     })
-
     if (response.ok) {
       console.log("WhatsApp message sent successfully")
       return true
@@ -74,7 +70,6 @@ function generateAppointmentMessage(data: IFormInput, uhid: string, appointmentT
 
   if (appointmentType === "oncall") {
     return `🏥 *APPOINTMENT CONFIRMATION*
-
 Dear ${data.name},
 
 Your *On-Call Appointment* has been successfully registered!
@@ -87,14 +82,12 @@ Your *On-Call Appointment* has been successfully registered!
 ${data.referredBy ? `• Referred By: ${data.referredBy}` : ""}
 
 📞 Our medical team will contact you at the scheduled time.
-
 ${data.message ? `📝 *Notes:* ${data.message}` : ""}
 
 For any queries, please contact our reception.
-
 Thank you for choosing our healthcare services!
 
-* Medford Hospsital *`
+* Medford Hospital *`
   } else {
     // Hospital visit message
     const modalities = data.modalities || []
@@ -108,13 +101,11 @@ Thank you for choosing our healthcare services!
         return serviceDesc
       })
       .join("\n")
-
     const totalCharges = modalities.reduce((total, m) => total + m.charges, 0)
     const totalPaid = (Number(data.cashAmount) || 0) + (Number(data.onlineAmount) || 0)
     const discount = Number(data.discount) || 0
 
     return `🏥 *APPOINTMENT CONFIRMATION*
-
 Dear ${data.name},
 
 Your *Appointment* has been successfully booked!
@@ -131,11 +122,9 @@ ${data.referredBy ? `• Referred By: ${data.referredBy}` : ""}
 ${discount > 0 ? `• Discount: ₹${discount}` : ""}
 • Amount Paid: ₹${totalPaid}
 • Payment Method: ${data.paymentMethod?.charAt(0).toUpperCase() + data.paymentMethod?.slice(1)}
-
 ${data.message ? `📝 *Notes:* ${data.message}` : ""}
 
 For any queries, please contact our reception.
-
 Thank you for choosing our healthcare services!
 
 *Gautami Medford NX Healthcare*`
@@ -165,6 +154,7 @@ export default function Page() {
       name: "",
       phone: "",
       age: undefined,
+      ageUnit: "years", // Default age unit
       gender: "",
       address: "",
       date: new Date(),
@@ -305,24 +295,26 @@ export default function Page() {
   }
 
   const validateAndSubmit = async (data: IFormInput) => {
-    const required: Array<keyof IFormInput> = ["name", "phone", "age", "gender", "date", "time"]
-
+    const required: Array<keyof IFormInput> = ["name", "phone", "age", "ageUnit", "gender", "date", "time"] // Added ageUnit
     // For hospital visits, validate modalities and payment
     if (data.appointmentType === "visithospital") {
       required.push("modalities")
-
       // Validate modalities
       if (!data.modalities || data.modalities.length === 0) {
         toast.error("Please select at least one service")
         return
       }
-
       required.push("paymentMethod")
       if (data.paymentMethod === "mixed") {
         required.push("cashAmount", "onlineAmount")
       } else if (data.paymentMethod === "cash") {
         required.push("cashAmount")
-      } else if (data.paymentMethod === "online") {
+      } else if (
+        data.paymentMethod === "online" ||
+        data.paymentMethod === "card-credit" ||
+        data.paymentMethod === "card-debit"
+      ) {
+        // Updated
         required.push("onlineAmount")
       }
     }
@@ -340,13 +332,13 @@ export default function Page() {
     try {
       // Determine UHID
       const uhid = selectedPatient?.id || (await generateNextUHID())
-
       if (!selectedPatient) {
         // new patient
         await set(ref(db, `patients/patientinfo/${uhid}`), {
           name: data.name,
           phone: data.phone,
           age: data.age,
+          ageUnit: data.ageUnit, // Save age unit
           gender: data.gender,
           address: data.address,
           createdAt: new Date().toISOString(),
@@ -358,6 +350,7 @@ export default function Page() {
           name: data.name,
           phone: data.phone,
           age: data.age,
+          ageUnit: data.ageUnit, // Update age unit
           gender: data.gender,
           address: data.address,
           updatedAt: new Date().toISOString(),
@@ -371,6 +364,7 @@ export default function Page() {
           name: data.name,
           phone: data.phone,
           age: data.age,
+          ageUnit: data.ageUnit, // Save age unit
           gender: data.gender,
           patientId: uhid,
           date: data.date.toISOString(),
@@ -380,11 +374,9 @@ export default function Page() {
           enteredBy: currentUserEmail || "unknown",
           createdAt: new Date().toISOString(),
         })
-
         // Send WhatsApp message for on-call appointment
         const professionalMessage = generateAppointmentMessage(data, uhid, "oncall")
         const messageSent = await sendWhatsAppMessage(data.phone, professionalMessage)
-
         if (messageSent) {
           toast.success("On-call appointment registered successfully! Confirmation sent via WhatsApp.")
         } else {
@@ -396,29 +388,23 @@ export default function Page() {
         const cash = Number(data.cashAmount) || 0
         const online = Number(data.onlineAmount) || 0
         const discount = Number(data.discount) || 0
-
         // Calculate total charges from all modalities (before discount)
         const totalCharges = getTotalModalityCharges()
-
         // Total amount paid
         const totalPaid = cash + online
-
         // push OPD record
         const appointmentDateKey =
           data.date instanceof Date
             ? data.date.toISOString().slice(0, 10)
             : new Date(data.date).toISOString().slice(0, 10)
-
         // Save under: /patients/opddetail/yyyy-MM-dd/{uhid}/{appointmentId}
         const opdRef = push(ref(db, `patients/opddetail/${appointmentDateKey}/${uhid}`))
-
         // Store all modalities as a separate array in the database
         const modalitiesData = data.modalities.map((modality: ModalitySelection) => {
           // Find doctor name from ID
           const doctorName = modality.doctor
             ? doctors.find((d) => d.id === modality.doctor)?.name || modality.doctor
             : null
-
           return {
             type: modality.type,
             doctor: doctorName, // Save doctor name instead of ID
@@ -429,7 +415,6 @@ export default function Page() {
             charges: modality.charges,
           }
         })
-
         await set(opdRef, {
           name: data.name,
           phone: data.phone,
@@ -447,7 +432,6 @@ export default function Page() {
           enteredBy: currentUserEmail || "unknown",
           createdAt: new Date().toISOString(),
         })
-
         // payment - store total charges without discount
         const opdId = opdRef.key
         if (opdId) {
@@ -461,11 +445,9 @@ export default function Page() {
             createdAt: new Date().toISOString(),
           })
         }
-
         // Send WhatsApp message for hospital appointment
         const professionalMessage = generateAppointmentMessage(data, uhid, "hospital")
         const messageSent = await sendWhatsAppMessage(data.phone, professionalMessage)
-
         if (messageSent) {
           toast.success("Hospital appointment booked successfully! Confirmation sent via WhatsApp.")
         } else {
@@ -473,7 +455,6 @@ export default function Page() {
           toast.warning("WhatsApp message could not be sent. Please contact the patient manually.")
         }
       }
-
       setIsSubmitted(true)
       setTimeout(() => {
         setIsSubmitted(false)
@@ -481,6 +462,7 @@ export default function Page() {
           name: "",
           phone: "",
           age: undefined,
+          ageUnit: "years", // Reset age unit
           gender: "",
           address: "",
           date: new Date(),
@@ -531,10 +513,8 @@ export default function Page() {
     setValue("time", appointment.time)
     setValue("message", appointment.message || "")
     setValue("referredBy", appointment.referredBy || "")
-
     // Switch to booking tab
     setActiveTab("booking")
-
     toast.info("Patient information pre-filled. Please select services and payment details.")
   }
 
@@ -544,6 +524,7 @@ export default function Page() {
       name: "",
       phone: "",
       age: undefined,
+      ageUnit: "years", // Reset age unit
       gender: "",
       address: "",
       date: new Date(),
@@ -591,7 +572,6 @@ export default function Page() {
         <title>OPD Management System</title>
       </Head>
       <ToastContainer />
-
       {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -610,7 +590,6 @@ export default function Page() {
           </div>
         </div>
       </div>
-
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         <Card className="shadow-lg border-0">
@@ -629,7 +608,6 @@ export default function Page() {
                   On-Call List ({onCallAppointments.length})
                 </TabsTrigger>
               </TabsList>
-
               <TabsContent value="booking" className="p-6 mt-0">
                 <form onSubmit={handleSubmit(validateAndSubmit)} className="space-y-6">
                   <PatientForm
@@ -651,7 +629,6 @@ export default function Page() {
                     setShowPhoneSuggestions={setShowPhoneSuggestions}
                     setShowUhidSuggestions={setShowUhidSuggestions} // Pass UHID suggestion visibility setter
                   />
-
                   <div className="flex justify-end pt-6 border-t bg-gray-50 -mx-6 px-6 -mb-6 pb-6">
                     <Button
                       type="submit"
@@ -672,7 +649,6 @@ export default function Page() {
                   </div>
                 </form>
               </TabsContent>
-
               <TabsContent value="oncall" className="p-6 mt-0">
                 <OnCallAppointments
                   appointments={onCallAppointments}

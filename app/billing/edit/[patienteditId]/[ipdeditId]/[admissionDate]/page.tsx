@@ -29,6 +29,7 @@ export interface IPDFormInput {
   phone: string
   gender: { label: string; value: string } | null
   age: number
+  ageUnit: { label: string; value: string } | null // ADDED: Age Unit field
   address?: string
 
   // Relative
@@ -56,7 +57,9 @@ interface PatientRecord {
   phone: string
   gender: string
   age: number
+  ageUnit?: string // ADDED: Age Unit to PatientRecord
   address: string
+  uhid?: string // Added UHID to PatientRecord for consistency
 }
 
 interface IPDRecord {
@@ -88,6 +91,13 @@ const GenderOptions = [
   { value: "other", label: "Other" },
 ]
 
+const AgeUnitOptions = [
+  // NEW CONSTANT
+  { value: "years", label: "Years" },
+  { value: "months", label: "Months" },
+  { value: "days", label: "Days" },
+]
+
 const AdmissionTypeOptions = [
   { value: "general", label: "General" },
   { value: "surgery", label: "Surgery" },
@@ -103,17 +113,17 @@ const AdmissionSourceOptions = [
 ]
 
 const RoomTypeOptions = [
-  { value: "female_general_ward",    label: "Female General Ward" },
-    { value: "icu",                    label: "ICU" },
-    { value: "male_general_ward",      label: "Male General Ward" },
-    { value: "maternity_ward",         label: "Maternity Ward" },
-    { value: "medford_general_ward",   label: "Medford General Ward" },
-    { value: "nicu",                   label: "NICU" },
-    { value: "paediatric_ward",        label: "Paediatric Ward" },
-    { value: "test_ward",              label: "Test Ward" },
-      { value: "twin_sharing_deluxe",    label: "Twin Sharing Deluxe" },
-    { value: "suit_room",              label: "Suit room" },
-    { value: "deluxe_room",              label: "Deluxe room" },
+  { value: "female_general_ward", label: "Female General Ward" },
+  { value: "icu", label: "ICU" },
+  { value: "male_general_ward", label: "Male General Ward" },
+  { value: "maternity_ward", label: "Maternity Ward" },
+  { value: "medford_general_ward", label: "Medford General Ward" },
+  { value: "nicu", label: "NICU" },
+  { value: "paediatric_ward", label: "Paediatric Ward" },
+  { value: "test_ward", label: "Test Ward" },
+  { value: "twin_sharing_deluxe", label: "Twin Sharing Deluxe" },
+  { value: "suit_room", label: "Suit room" },
+  { value: "deluxe_room", label: "Deluxe room" },
 ]
 
 const PaymentModeOptions = [
@@ -196,6 +206,7 @@ export default function EditIPDPage() {
       phone: "",
       gender: null,
       age: 0,
+      ageUnit: AgeUnitOptions.find((opt) => opt.value === "years") || null, // ADDED default
       address: "",
       relativeName: "",
       relativePhone: "",
@@ -262,6 +273,9 @@ export default function EditIPDPage() {
       const genderMatch = GenderOptions.find((g) => g.value.toLowerCase() === data.gender?.toLowerCase())
       setValue("gender", genderMatch || null)
       setValue("age", data.age)
+      // Set age unit if available, otherwise default to Years
+      const ageUnitMatch = AgeUnitOptions.find((u) => u.value === data.ageUnit)
+      setValue("ageUnit", ageUnitMatch || AgeUnitOptions[0]) // ADDED: Set age unit
       setValue("address", data.address)
     })
     return () => unsubscribe()
@@ -421,6 +435,10 @@ export default function EditIPDPage() {
     if (String(origP.age || "") !== String(upd.age || "")) {
       changes.push({ field: "age", oldValue: origP.age, newValue: upd.age })
     }
+    if (String(origP.ageUnit || "") !== String(upd.ageUnit?.value || "")) {
+      // ADDED: Age Unit change detection
+      changes.push({ field: "ageUnit", oldValue: origP.ageUnit, newValue: upd.ageUnit?.value })
+    }
     if (String(origP.address || "") !== String(upd.address || "")) {
       changes.push({ field: "address", oldValue: origP.address, newValue: upd.address || "" })
     }
@@ -514,6 +532,10 @@ export default function EditIPDPage() {
         patientUpdates.gender = data.gender?.value || ""
       }
       if (String(originalPatient.age) !== String(data.age)) patientUpdates.age = data.age
+      if (String(originalPatient.ageUnit) !== String(data.ageUnit?.value || "")) {
+        // ADDED: Update age unit
+        patientUpdates.ageUnit = data.ageUnit?.value || ""
+      }
       if (String(originalPatient.address) !== String(data.address || "")) {
         patientUpdates.address = data.address || ""
       }
@@ -533,7 +555,7 @@ export default function EditIPDPage() {
         await update(newBedRef, { status: "Occupied" })
       }
 
-      // 3) Update IPD record
+      // 3) Update IPD record (userinfoipd)
       const ipdData: any = {
         relativeName: data.relativeName,
         relativePhone: data.relativePhone,
@@ -576,7 +598,37 @@ export default function EditIPDPage() {
         })
       }
 
-      // 5) Save change tracking
+      // 5) Update ipdactive node if relevant fields changed
+      const ipdActiveUpdates: any = {}
+      let shouldUpdateIpdActive = false
+
+      // Check for changes in fields relevant to ipdactive
+      if (String(originalPatient.name) !== String(data.name)) {
+        ipdActiveUpdates.name = data.name
+        shouldUpdateIpdActive = true
+      }
+      if (String(originalPatient.phone) !== String(data.phone)) {
+        ipdActiveUpdates.phone = data.phone
+        shouldUpdateIpdActive = true
+      }
+      if (String(originalIPD.roomType) !== String(data.roomType?.value || "")) {
+        ipdActiveUpdates.ward = data.roomType?.label || data.roomType?.value || ""
+        shouldUpdateIpdActive = true
+      }
+      if (String(originalIPD.bed) !== String(data.bed?.value || "")) {
+        ipdActiveUpdates.bed = data.bed?.label || ""
+        shouldUpdateIpdActive = true
+      }
+      if (String(originalBilling.totalDeposit || 0) !== String(data.deposit || 0)) {
+        ipdActiveUpdates.advanceDeposit = data.deposit || 0
+        shouldUpdateIpdActive = true
+      }
+
+      if (shouldUpdateIpdActive) {
+        await update(ref(db, `patients/ipdactive/${ipdeditId}`), ipdActiveUpdates)
+      }
+
+      // 6) Save change tracking
       const changesRef = ref(db, "ipdChanges")
       const newChangeRef = push(changesRef)
       await set(newChangeRef, {
@@ -679,17 +731,42 @@ export default function EditIPDPage() {
                   {errors.gender && <p className="text-xs text-red-500">Gender is required</p>}
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="age" className="text-sm font-medium">
-                    Age <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="age"
-                    type="number"
-                    {...register("age", { required: true, min: 0 })}
-                    placeholder="Patient age"
-                  />
-                  {errors.age && <p className="text-xs text-red-500">Valid age is required</p>}
+                {/* Age and Age Unit in a single row */}
+                <div className="grid grid-cols-2 gap-4">
+                  {" "}
+                  {/* Adjusted to be a grid for age and unit */}
+                  <div className="space-y-2">
+                    <Label htmlFor="age" className="text-sm font-medium">
+                      Age <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="age"
+                      type="number"
+                      {...register("age", { required: true, min: 0 })} // Changed min to 0
+                      placeholder="Patient age"
+                    />
+                    {errors.age && <p className="text-xs text-red-500">Valid age is required</p>}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ageUnit" className="text-sm font-medium">
+                      Unit <span className="text-red-500">*</span>
+                    </Label>
+                    <Controller
+                      control={control}
+                      name="ageUnit"
+                      rules={{ required: true }}
+                      render={({ field }) => (
+                        <Select
+                          {...field}
+                          options={AgeUnitOptions}
+                          placeholder="Select Unit"
+                          styles={selectStyles}
+                          classNamePrefix="react-select"
+                        />
+                      )}
+                    />
+                    {errors.ageUnit && <p className="text-xs text-red-500">Age unit is required</p>}
+                  </div>
                 </div>
 
                 <div className="space-y-2 md:col-span-2">

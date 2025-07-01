@@ -3,7 +3,8 @@
 import type React from "react"
 import { useEffect, useRef, useCallback, useMemo } from "react"
 import { type UseFormReturn, Controller } from "react-hook-form"
-import { type IFormInput, type PatientRecord, GenderOptions, PaymentOptions } from "./types"
+import { type IFormInput, type PatientRecord, GenderOptions, PaymentOptions, AgeUnitOptions } from "./types" // Import AgeUnitOptions
+
 import {
   Phone,
   Cake,
@@ -20,8 +21,10 @@ import {
   PhoneCall,
   Search,
 } from "lucide-react"
+
 import DatePicker from "react-datepicker"
 import "react-datepicker/dist/react-datepicker.css"
+
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
@@ -30,6 +33,7 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+
 import { ModalitySelector } from "./modality-selector"
 import type { Doctor } from "./types"
 import { DoctorSearchDropdown } from "./Component/doctor-search-dropdown" // Import DoctorSearchDropdown
@@ -90,7 +94,6 @@ export function PatientForm({
     watch,
     setValue,
   } = form
-
   const nameInputRef = useRef<HTMLInputElement | null>(null)
   const phoneInputRef = useRef<HTMLInputElement | null>(null)
   const uhidInputRef = useRef<HTMLInputElement | null>(null) // New ref for UHID input
@@ -135,19 +138,15 @@ export function PatientForm({
   // Fixed payment calculation logic - only for hospital visits
   useEffect(() => {
     if (watchedAppointmentType !== "visithospital") return
-
     const totalCharges = totalModalityCharges
     const cashAmount = Number(watchedCashAmount) || 0
     const onlineAmount = Number(watchedOnlineAmount) || 0
     const totalPaid = cashAmount + onlineAmount
-
     let discount = 0
-
     // Calculate discount based on the difference between total charges and amount paid
     if (totalPaid < totalCharges) {
       discount = totalCharges - totalPaid
     }
-
     // Only update if discount has actually changed
     if (watch("discount") !== discount) {
       setValue("discount", discount)
@@ -285,7 +284,6 @@ export function PatientForm({
               </div>
               {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
             </div>
-
             {/* Phone */}
             <div className="space-y-2">
               <Label htmlFor="phone" className="text-sm font-medium">
@@ -347,7 +345,6 @@ export function PatientForm({
               </div>
               {errors.phone && <p className="text-sm text-red-500">{errors.phone.message}</p>}
             </div>
-
             {/* UHID Search - New Field */}
             <div className="space-y-2">
               <Label htmlFor="uhid" className="text-sm font-medium">
@@ -393,7 +390,8 @@ export function PatientForm({
                 )}
               </div>
             </div>
-
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {/* Age */}
             <div className="space-y-2">
               <Label htmlFor="age" className="text-sm font-medium">
@@ -406,15 +404,42 @@ export function PatientForm({
                   type="number"
                   {...register("age", {
                     required: "Age is required",
-                    min: { value: 1, message: "Age must be positive" },
+                    min: { value: 0, message: "Age must be positive" },
+                    valueAsNumber: true,
                   })}
                   placeholder="Enter age"
                   className={`pl-10 ${errors.age ? "border-red-500" : ""}`}
+                  onWheel={(e) => e.currentTarget.blur()} // Prevent scroll on number input
                 />
               </div>
               {errors.age && <p className="text-sm text-red-500">{errors.age.message}</p>}
             </div>
-
+            {/* Age Unit - New Field */}
+            <div className="space-y-2">
+              <Label htmlFor="ageUnit" className="text-sm font-medium">
+                Age Unit <span className="text-red-500">*</span>
+              </Label>
+              <Controller
+                control={control}
+                name="ageUnit"
+                rules={{ required: "Age unit is required" }}
+                render={({ field }) => (
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <SelectTrigger className={errors.ageUnit ? "border-red-500" : ""}>
+                      <SelectValue placeholder="Select unit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AgeUnitOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {errors.ageUnit && <p className="text-sm text-red-500">{errors.ageUnit.message}</p>}
+            </div>
             {/* Gender */}
             <div className="space-y-2">
               <Label htmlFor="gender" className="text-sm font-medium">
@@ -441,7 +466,6 @@ export function PatientForm({
               />
               {errors.gender && <p className="text-sm text-red-500">{errors.gender.message}</p>}
             </div>
-
             {/* Consulting Doctor - New Field */}
             <div className="space-y-2">
               <Label htmlFor="doctor" className="text-sm font-medium">
@@ -462,7 +486,6 @@ export function PatientForm({
               {errors.doctor && <p className="text-sm text-red-500">{errors.doctor.message}</p>}
             </div>
           </div>
-
           {/* Appointment Type and Date/Time Row */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Appointment Type */}
@@ -509,7 +532,6 @@ export function PatientForm({
                 </div>
               </div>
             </div>
-
             {/* Date, Time, and Referred By */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
@@ -537,7 +559,6 @@ export function PatientForm({
                 </div>
                 {errors.date && <p className="text-sm text-red-500">{errors.date.message}</p>}
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="time" className="text-sm font-medium">
                   Time <span className="text-red-500">*</span>
@@ -555,7 +576,6 @@ export function PatientForm({
                 </div>
                 {errors.time && <p className="text-sm text-red-500">{errors.time.message}</p>}
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="referredBy" className="text-sm font-medium">
                   Referred By
@@ -564,7 +584,6 @@ export function PatientForm({
               </div>
             </div>
           </div>
-
           {/* Address - Only for hospital visits */}
           {watchedAppointmentType === "visithospital" && (
             <div className="space-y-2">
@@ -584,7 +603,6 @@ export function PatientForm({
           )}
         </CardContent>
       </Card>
-
       {/* Medical Services Section - Only for hospital visits */}
       {watchedAppointmentType === "visithospital" && (
         <Card className="border-l-4 border-l-green-500">
@@ -604,7 +622,6 @@ export function PatientForm({
                   if (!modalities || modalities.length === 0) {
                     return "At least one service is required"
                   }
-
                   for (const modality of modalities) {
                     if (modality.type === "consultation") {
                       if (!modality.specialist) return "Specialist is required for consultation"
@@ -616,7 +633,8 @@ export function PatientForm({
                         modality.type === "xray" ||
                         modality.type === "pathology" ||
                         modality.type === "ipd" ||
-                        modality.type === "radiology") &&
+                        modality.type === "radiology" ||
+                        modality.type === "cardiology") && // Added cardiology
                       !modality.service
                     ) {
                       return `Service is required for ${modality.type}`
@@ -633,7 +651,6 @@ export function PatientForm({
           </CardContent>
         </Card>
       )}
-
       {/* Payment Section - Only for hospital visits */}
       {watchedAppointmentType === "visithospital" && (
         <Card className="border-l-4 border-l-purple-500">
@@ -673,7 +690,6 @@ export function PatientForm({
                 />
                 {errors.paymentMethod && <p className="text-sm text-red-500">{errors.paymentMethod.message}</p>}
               </div>
-
               {/* Total Charges Display */}
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Total Charges</Label>
@@ -686,7 +702,6 @@ export function PatientForm({
                   />
                 </div>
               </div>
-
               {/* Amount Fields */}
               {watchedPaymentMethod === "mixed" ? (
                 <>
@@ -706,12 +721,11 @@ export function PatientForm({
                           min: { value: 0, message: "Amount must be positive" },
                           valueAsNumber: true,
                         })}
-                        onWheel={e => e.currentTarget.blur()}
+                        onWheel={(e) => e.currentTarget.blur()}
                       />
                     </div>
                     {errors.cashAmount && <p className="text-sm text-red-500">{errors.cashAmount.message}</p>}
                   </div>
-
                   <div className="space-y-2">
                     <Label htmlFor="onlineAmount" className="text-sm font-medium">
                       Online Amount <span className="text-red-500">*</span>
@@ -728,30 +742,33 @@ export function PatientForm({
                           min: { value: 0, message: "Amount must be positive" },
                           valueAsNumber: true,
                         })}
-                        onWheel={e => e.currentTarget.blur()}
+                        onWheel={(e) => e.currentTarget.blur()}
                       />
                     </div>
                     {errors.onlineAmount && <p className="text-sm text-red-500">{errors.onlineAmount.message}</p>}
                   </div>
                 </>
-              ) : watchedPaymentMethod === "online" ? (
+              ) : watchedPaymentMethod === "online" ||
+                watchedPaymentMethod === "card-credit" ||
+                watchedPaymentMethod === "card-debit" ? ( // Updated
                 <div className="space-y-2">
                   <Label htmlFor="onlineAmount" className="text-sm font-medium">
-                    Online Amount <span className="text-red-500">*</span>
+                    {watchedPaymentMethod === "online" ? "Online Amount" : "Card Amount"}{" "}
+                    <span className="text-red-500">*</span>
                   </Label>
                   <div className="relative">
                     <IndianRupeeIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                     <Input
                       id="onlineAmount"
                       type="number"
-                      placeholder="Online amount"
+                      placeholder={watchedPaymentMethod === "online" ? "Online amount" : "Card amount"}
                       className={`pl-10 ${errors.onlineAmount ? "border-red-500" : ""}`}
                       {...register("onlineAmount", {
-                        required: watchedAppointmentType === "visithospital" ? "Online amount is required" : false,
+                        required: watchedAppointmentType === "visithospital" ? "Amount is required" : false,
                         min: { value: 0, message: "Amount must be positive" },
                         valueAsNumber: true,
                       })}
-                      onWheel={e => e.currentTarget.blur()}
+                      onWheel={(e) => e.currentTarget.blur()}
                     />
                   </div>
                   {errors.onlineAmount && <p className="text-sm text-red-500">{errors.onlineAmount.message}</p>}
@@ -773,13 +790,12 @@ export function PatientForm({
                         min: { value: 0, message: "Amount must be positive" },
                         valueAsNumber: true,
                       })}
-                      onWheel={e => e.currentTarget.blur()}
+                      onWheel={(e) => e.currentTarget.blur()}
                     />
                   </div>
                   {errors.cashAmount && <p className="text-sm text-red-500">{errors.cashAmount.message}</p>}
                 </div>
               )}
-
               {/* Discount */}
               <div className="space-y-2">
                 <Label htmlFor="discount" className="text-sm font-medium">
@@ -802,7 +818,6 @@ export function PatientForm({
                 {errors.discount && <p className="text-sm text-red-500">{errors.discount.message}</p>}
               </div>
             </div>
-
             {/* Payment Summary */}
             {totalModalityCharges > 0 && (
               <Card className="bg-gradient-to-r from-green-50 to-blue-50 border-green-200">
@@ -825,7 +840,6 @@ export function PatientForm({
                       <span>₹{calculateTotalAmount()}</span>
                     </div>
                   </div>
-
                   {/* Payment Breakdown */}
                   <div className="mt-3 pt-3 border-t border-green-200">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs text-gray-600">
@@ -847,9 +861,11 @@ export function PatientForm({
                           <span>₹{Number(watchedCashAmount) || 0}</span>
                         </div>
                       )}
-                      {watchedPaymentMethod === "online" && (
+                      {(watchedPaymentMethod === "online" ||
+                        watchedPaymentMethod === "card-credit" ||
+                        watchedPaymentMethod === "card-debit") && ( // Updated
                         <div className="flex justify-between">
-                          <span>Online Paid:</span>
+                          <span>{watchedPaymentMethod === "online" ? "Online Paid" : "Card Paid"}:</span>
                           <span>₹{Number(watchedOnlineAmount) || 0}</span>
                         </div>
                       )}
@@ -861,7 +877,6 @@ export function PatientForm({
           </CardContent>
         </Card>
       )}
-
       {/* Notes Section */}
       <Card className="border-l-4 border-l-orange-500">
         <CardHeader className="pb-4">

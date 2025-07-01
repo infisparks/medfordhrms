@@ -1,15 +1,25 @@
 "use client"
 
 import type React from "react"
+
 import { useState, useEffect, useMemo } from "react"
-import { useForm, type SubmitHandler } from "react-hook-form"
+
+import { useForm, type SubmitHandler, FieldError } from "react-hook-form" // Import FieldError
+
 import { yupResolver } from "@hookform/resolvers/yup"
+
 import * as yup from "yup"
+
 import { db } from "../../lib/firebase"
+
 import { ref, push, update, onValue, remove } from "firebase/database"
+
 import Head from "next/head"
+
 import { AiOutlineDelete, AiOutlineEdit } from "react-icons/ai"
+
 import { ToastContainer, toast } from "react-toastify"
+
 import "react-toastify/dist/ReactToastify.css"
 
 // -----------------------------------------------------------------------------
@@ -47,6 +57,7 @@ const AdminDoctorsPage: React.FC = () => {
   // 1) Fetch dynamic roomTypes from "beds" in Firebase
   // ---------------------------------------------------------------------------
   const [roomTypes, setRoomTypes] = useState<string[]>([])
+
   useEffect(() => {
     const bedsRef = ref(db, "beds")
     const unsubscribeBeds = onValue(bedsRef, (snapshot) => {
@@ -104,7 +115,13 @@ const AdminDoctorsPage: React.FC = () => {
             .positive("First visit amount must be positive")
             .required("First visit amount is required")
         }
-        return schema.notRequired()
+        return schema
+          .notRequired()
+          .nullable()
+          .transform((value, originalValue) => {
+            // Transform empty string to null for optional number fields
+            return originalValue === "" ? null : value
+          })
       }),
       followUpCharge: yup.number().when("department", ([dept], schema) => {
         if (dept === "OPD" || dept === "Both") {
@@ -113,7 +130,13 @@ const AdminDoctorsPage: React.FC = () => {
             .positive("Follow-up amount must be positive")
             .required("Follow-up amount is required")
         }
-        return schema.notRequired()
+        return schema
+          .notRequired()
+          .nullable()
+          .transform((value, originalValue) => {
+            // Transform empty string to null for optional number fields
+            return originalValue === "" ? null : value
+          })
       }),
       ipdCharges: yup.mixed().when("department", ([dept], schema) => {
         if (dept === "IPD" || dept === "Both") {
@@ -133,6 +156,7 @@ const AdminDoctorsPage: React.FC = () => {
     formState: { errors },
     reset,
     watch,
+    setValue,
   } = useForm<IDoctorFormInput>({
     resolver: yupResolver(schema),
     // MODIFICATION: Default values updated for specialist array
@@ -145,6 +169,7 @@ const AdminDoctorsPage: React.FC = () => {
       ipdCharges: {},
     },
   })
+
   const departmentValue = watch("department")
 
   // ---------------------------------------------------------------------------
@@ -156,6 +181,7 @@ const AdminDoctorsPage: React.FC = () => {
     formState: { errors: errorsEdit },
     reset: resetEdit,
     watch: watchEdit,
+    setValue: setValueEdit,
   } = useForm<IDoctorFormInput>({
     resolver: yupResolver(schema),
     // MODIFICATION: Default values updated for specialist array
@@ -168,6 +194,7 @@ const AdminDoctorsPage: React.FC = () => {
       ipdCharges: {},
     },
   })
+
   const departmentValueEdit = watchEdit("department")
 
   // ---------------------------------------------------------------------------
@@ -177,6 +204,68 @@ const AdminDoctorsPage: React.FC = () => {
   const [doctors, setDoctors] = useState<IDoctor[]>([])
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [currentDoctor, setCurrentDoctor] = useState<IDoctor | null>(null)
+
+  // ---------------------------------------------------------------------------
+  // Effect to initialize IPD charges when department changes or roomTypes load (Add Form)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (departmentValue === "IPD" || departmentValue === "Both") {
+      const currentIpdCharges = watch("ipdCharges") || {}
+      const newIpdCharges: IIPDCharges = {}
+      roomTypes.forEach((room) => {
+        newIpdCharges[room] = currentIpdCharges[room] ?? 0 // Initialize with 0 or existing value
+      })
+      // Only update if there's a significant change to avoid unnecessary re-renders
+      if (JSON.stringify(newIpdCharges) !== JSON.stringify(currentIpdCharges)) {
+        setValue("ipdCharges", newIpdCharges, { shouldValidate: true })
+      }
+    } else {
+      // If department is not IPD or Both, ensure ipdCharges is empty
+      const currentIpdCharges = watch("ipdCharges")
+      if (Object.keys(currentIpdCharges || {}).length > 0) {
+        setValue("ipdCharges", {}, { shouldValidate: true })
+      }
+    }
+  }, [departmentValue, roomTypes, watch, setValue])
+
+  // NEW: Effect to clear OPD charges when department is IPD (Add Form)
+  useEffect(() => {
+    if (departmentValue === "IPD") {
+      setValue("firstVisitCharge", undefined, { shouldValidate: true })
+      setValue("followUpCharge", undefined, { shouldValidate: true })
+    }
+  }, [departmentValue, setValue])
+
+  // ---------------------------------------------------------------------------
+  // Effect to initialize IPD charges when department changes or roomTypes load (Edit Form)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (isEditModalOpen && currentDoctor) {
+      if (departmentValueEdit === "IPD" || departmentValueEdit === "Both") {
+        const currentIpdCharges = watchEdit("ipdCharges") || {}
+        const newIpdCharges: IIPDCharges = {}
+        roomTypes.forEach((room) => {
+          newIpdCharges[room] = currentIpdCharges[room] ?? 0
+        })
+        if (JSON.stringify(newIpdCharges) !== JSON.stringify(currentIpdCharges)) {
+          setValueEdit("ipdCharges", newIpdCharges, { shouldValidate: true })
+        }
+      } else {
+        const currentIpdCharges = watchEdit("ipdCharges")
+        if (Object.keys(currentIpdCharges || {}).length > 0) {
+          setValueEdit("ipdCharges", {}, { shouldValidate: true })
+        }
+      }
+    }
+  }, [departmentValueEdit, roomTypes, watchEdit, isEditModalOpen, currentDoctor, setValueEdit])
+
+  // NEW: Effect to clear OPD charges when department is IPD (Edit Form)
+  useEffect(() => {
+    if (isEditModalOpen && departmentValueEdit === "IPD") {
+      setValueEdit("firstVisitCharge", undefined, { shouldValidate: true })
+      setValueEdit("followUpCharge", undefined, { shouldValidate: true })
+    }
+  }, [departmentValueEdit, isEditModalOpen, setValueEdit])
 
   // ---------------------------------------------------------------------------
   // 6) Fetch doctors from Firebase
@@ -208,18 +297,17 @@ const AdminDoctorsPage: React.FC = () => {
   // 7) Add Doctor
   // ---------------------------------------------------------------------------
   const onSubmit: SubmitHandler<IDoctorFormInput> = async (formData) => {
+    console.log("Submitting form data:", formData) // Debugging log
     setLoading(true)
     try {
       const doctorsRef = ref(db, "doctors")
       const newDoctorRef = push(doctorsRef)
-
       const newDoctor: IDoctor = {
         id: newDoctorRef.key || "",
         name: formData.name,
         specialist: formData.specialist,
         department: formData.department,
       }
-
       if (formData.department === "OPD" || formData.department === "Both") {
         newDoctor.firstVisitCharge = formData.firstVisitCharge
         newDoctor.followUpCharge = formData.followUpCharge
@@ -227,14 +315,11 @@ const AdminDoctorsPage: React.FC = () => {
       if (formData.department === "IPD" || formData.department === "Both") {
         newDoctor.ipdCharges = formData.ipdCharges
       }
-
       await update(newDoctorRef, newDoctor)
-
       toast.success("Doctor added successfully!", {
         position: "top-right",
         autoClose: 5000,
       })
-
       // MODIFICATION: Reset form with specialist array
       reset({
         name: "",
@@ -260,6 +345,7 @@ const AdminDoctorsPage: React.FC = () => {
   // ---------------------------------------------------------------------------
   const handleDelete = async (doctorId: string) => {
     if (!confirm("Are you sure you want to delete this doctor?")) return
+
     try {
       const doctorRef = ref(db, `doctors/${doctorId}`)
       await remove(doctorRef)
@@ -306,17 +392,17 @@ const AdminDoctorsPage: React.FC = () => {
 
   // Submit the edited doc
   const onEditSubmit: SubmitHandler<IDoctorFormInput> = async (formData) => {
+    console.log("Submitting edit form data:", formData) // Debugging log
     if (!currentDoctor) return
+
     setLoading(true)
     try {
       const doctorRef = ref(db, `doctors/${currentDoctor.id}`)
-
       const updatedDoctor: Partial<IDoctor> = {
         name: formData.name,
         specialist: formData.specialist,
         department: formData.department,
       }
-
       if (formData.department === "OPD" || formData.department === "Both") {
         updatedDoctor.firstVisitCharge = formData.firstVisitCharge
         updatedDoctor.followUpCharge = formData.followUpCharge
@@ -324,16 +410,16 @@ const AdminDoctorsPage: React.FC = () => {
       if (formData.department === "IPD" || formData.department === "Both") {
         updatedDoctor.ipdCharges = formData.ipdCharges
       }
+      // Explicitly delete OPD charges if department is IPD
       if (formData.department === "IPD") {
         delete updatedDoctor.firstVisitCharge
         delete updatedDoctor.followUpCharge
       }
+      // Explicitly delete IPD charges if department is OPD
       if (formData.department === "OPD") {
         delete updatedDoctor.ipdCharges
       }
-
       await update(doctorRef, updatedDoctor)
-
       toast.success("Doctor updated successfully!", {
         position: "top-right",
         autoClose: 5000,
@@ -374,15 +460,18 @@ const AdminDoctorsPage: React.FC = () => {
     "Anesthesiology",
     "Neuro - Surgery",
     "Onco - Surgeon",
-    "Gynecology"
-    
+    "Gynecology",
   ]
 
   // Function to prevent scroll wheel from changing number input values
   const preventWheelChange = (e: React.WheelEvent<HTMLInputElement>) => {
-    e.preventDefault();
-    (e.target as HTMLInputElement).blur();
+    e.preventDefault()
+    ;(e.target as HTMLInputElement).blur()
   }
+
+  // Debugging: Log the errors object to console
+  console.log("Form errors:", errors)
+  console.log("Edit form errors:", errorsEdit)
 
   // ---------------------------------------------------------------------------
   // JSX
@@ -394,15 +483,39 @@ const AdminDoctorsPage: React.FC = () => {
         <meta name="description" content="Add or remove doctors" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
-
       <ToastContainer />
-
       <main className="min-h-screen bg-gradient-to-r from-yellow-100 to-yellow-200 flex items-center justify-center p-6">
         <div className="w-full max-w-4xl bg-white rounded-3xl shadow-xl p-10">
           <h2 className="text-3xl font-bold text-center text-yellow-600 mb-8">Manage Doctors</h2>
-
           {/* Add Doctor Form */}
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 mb-10">
+            {/* General Error Display for Add Form */}
+            {Object.keys(errors).length > 0 && (
+              <div
+                className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4"
+                role="alert"
+              >
+                <strong className="font-bold">Validation Error!</strong>
+                <span className="block sm:inline"> Please check the form for errors.</span>
+                <ul className="mt-2 list-disc list-inside">
+                  {Object.entries(errors).map(([key, error]) => {
+                    if (key === "ipdCharges" && typeof error === "object" && error !== null) {
+                      return Object.entries(error).map(([subKey, subError]) => (
+                        <li key={`${key}-${subKey}`}>
+                          {subKey.replace(/_/g, " ").toUpperCase()} IPD Charge: {(subError as FieldError)?.message || "Error"}
+                        </li>
+                      ))
+                    }
+                    return (
+                      <li key={key}>
+                        {key}: {(error as FieldError)?.message || "Error"}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
+
             {/* Doctor Name */}
             <div className="relative">
               <input
@@ -415,7 +528,6 @@ const AdminDoctorsPage: React.FC = () => {
               />
               {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>}
             </div>
-
             {/* MODIFICATION: Specialist Multi-select */}
             <div className="relative">
               <label className="block text-sm font-medium text-gray-700 mb-1">Specialist (select one or more)</label>
@@ -434,7 +546,6 @@ const AdminDoctorsPage: React.FC = () => {
               </select>
               {errors.specialist && <p className="text-red-500 text-sm mt-1">{errors.specialist.message}</p>}
             </div>
-
             {/* Department */}
             <div className="relative">
               <select
@@ -449,7 +560,6 @@ const AdminDoctorsPage: React.FC = () => {
               </select>
               {errors.department && <p className="text-red-500 text-sm mt-1">{errors.department.message}</p>}
             </div>
-
             {/* MODIFICATION: Two separate inputs for OPD charges */}
             {(departmentValue === "OPD" || departmentValue === "Both") && (
               <>
@@ -464,7 +574,9 @@ const AdminDoctorsPage: React.FC = () => {
                       errors.firstVisitCharge ? "border-red-500" : "border-gray-300"
                     } transition duration-200`}
                   />
-                  {errors.firstVisitCharge && <p className="text-red-500 text-sm mt-1">{errors.firstVisitCharge.message}</p>}
+                  {errors.firstVisitCharge && (
+                    <p className="text-red-500 text-sm mt-1">{errors.firstVisitCharge.message}</p>
+                  )}
                 </div>
                 <div className="relative">
                   <input
@@ -477,18 +589,18 @@ const AdminDoctorsPage: React.FC = () => {
                       errors.followUpCharge ? "border-red-500" : "border-gray-300"
                     } transition duration-200`}
                   />
-                  {errors.followUpCharge && <p className="text-red-500 text-sm mt-1">{errors.followUpCharge.message}</p>}
+                  {errors.followUpCharge && (
+                    <p className="text-red-500 text-sm mt-1">{errors.followUpCharge.message}</p>
+                  )}
                 </div>
               </>
             )}
-
-
             {/* IPD Charges */}
             {(departmentValue === "IPD" || departmentValue === "Both") && roomTypes.length > 0 && (
               <div className="border p-4 rounded-lg space-y-4">
                 <p className="font-semibold text-gray-800">Enter IPD Ward Charges:</p>
                 {roomTypes.map((room) => {
-                  const roomError = errors.ipdCharges && (errors.ipdCharges as any)[room]
+                  const roomError = errors.ipdCharges && (errors.ipdCharges as any)[room] as FieldError | undefined;
                   return (
                     <div key={room}>
                       <label className="block text-sm">{room.replace(/_/g, " ").toUpperCase()} Charge</label>
@@ -508,7 +620,6 @@ const AdminDoctorsPage: React.FC = () => {
                 })}
               </div>
             )}
-
             {/* Submit Button */}
             <button
               type="submit"
@@ -520,7 +631,6 @@ const AdminDoctorsPage: React.FC = () => {
               {loading ? "Adding..." : "Add Doctor"}
             </button>
           </form>
-
           {/* Existing Doctors */}
           <div>
             <h3 className="text-2xl font-semibold text-gray-700 mb-4">Existing Doctors</h3>
@@ -538,15 +648,19 @@ const AdminDoctorsPage: React.FC = () => {
                       {/* MODIFICATION: Display multiple specialists */}
                       <p className="text-gray-600">Specialist: {doctor.specialist.join(", ")}</p>
                       <p className="text-gray-600">Department: {doctor.department}</p>
-                      {doctor.firstVisitCharge != null && <p className="text-gray-600">First Visit Charge: Rs {doctor.firstVisitCharge}</p>}
-                      {doctor.followUpCharge != null && <p className="text-gray-600">Follow Up Charge: Rs {doctor.followUpCharge}</p>}
+                      {doctor.firstVisitCharge != null && (
+                        <p className="text-gray-600">First Visit Charge: Rs {doctor.firstVisitCharge}</p>
+                      )}
+                      {doctor.followUpCharge != null && (
+                        <p className="text-gray-600">Follow Up Charge: Rs {doctor.followUpCharge}</p>
+                      )}
                       {doctor.ipdCharges && (
                         <div className="mt-2">
                           <p className="font-semibold">IPD Charges:</p>
                           <ul className="list-disc list-inside text-gray-600">
                             {Object.keys(doctor.ipdCharges).map((roomKey) => (
                               <li key={roomKey}>
-                                {roomKey.replace(/_/g, " ").toUpperCase()}:{"  "}
+                                {roomKey.replace(/_/g, " ").toUpperCase()}:{" "}
                                 {doctor.ipdCharges ? doctor.ipdCharges[roomKey] : "N/A"}
                               </li>
                             ))}
@@ -576,13 +690,39 @@ const AdminDoctorsPage: React.FC = () => {
             )}
           </div>
         </div>
-
         {/* Edit Modal */}
         {isEditModalOpen && currentDoctor && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-3xl shadow-xl p-10 w-full max-w-lg relative max-h-[90vh] overflow-y-auto">
               <h2 className="text-2xl font-bold text-center text-blue-600 mb-6">Edit Doctor</h2>
               <form onSubmit={handleSubmitEdit(onEditSubmit)} className="space-y-6">
+                {/* General Error Display for Edit Form */}
+                {Object.keys(errorsEdit).length > 0 && (
+                  <div
+                    className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4"
+                    role="alert"
+                  >
+                    <strong className="font-bold">Validation Error!</strong>
+                    <span className="block sm:inline"> Please check the form for errors.</span>
+                    <ul className="mt-2 list-disc list-inside">
+                      {Object.entries(errorsEdit).map(([key, error]) => {
+                        if (key === "ipdCharges" && typeof error === "object" && error !== null) {
+                          return Object.entries(error).map(([subKey, subError]) => (
+                            <li key={`${key}-${subKey}`}>
+                              {subKey.replace(/_/g, " ").toUpperCase()} IPD Charge: {(subError as FieldError)?.message || "Error"}
+                            </li>
+                          ))
+                        }
+                        return (
+                          <li key={key}>
+                            {key}: {(error as FieldError)?.message || 'Error'}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                )}
+
                 {/* Doctor Name */}
                 <div className="relative">
                   <input
@@ -595,10 +735,11 @@ const AdminDoctorsPage: React.FC = () => {
                   />
                   {errorsEdit.name && <p className="text-red-500 text-sm mt-1">{errorsEdit.name.message}</p>}
                 </div>
-
                 {/* MODIFICATION: Specialist Multi-select in Edit Modal */}
                 <div className="relative">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Specialist (select one or more)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Specialist (select one or more)
+                  </label>
                   <select
                     multiple
                     {...registerEdit("specialist")}
@@ -616,7 +757,6 @@ const AdminDoctorsPage: React.FC = () => {
                     <p className="text-red-500 text-sm mt-1">{errorsEdit.specialist.message}</p>
                   )}
                 </div>
-
                 {/* Department */}
                 <div className="relative">
                   <select
@@ -633,7 +773,6 @@ const AdminDoctorsPage: React.FC = () => {
                     <p className="text-red-500 text-sm mt-1">{errorsEdit.department.message}</p>
                   )}
                 </div>
-
                 {/* MODIFICATION: Two separate inputs for OPD charges in the edit modal */}
                 {(departmentValueEdit === "OPD" || departmentValueEdit === "Both") && (
                   <>
@@ -669,14 +808,12 @@ const AdminDoctorsPage: React.FC = () => {
                     </div>
                   </>
                 )}
-
-
                 {/* IPD Charges */}
                 {(departmentValueEdit === "IPD" || departmentValueEdit === "Both") && roomTypes.length > 0 && (
                   <div className="border p-4 rounded-lg space-y-4">
                     <p className="font-semibold text-gray-800">Enter IPD Ward Charges:</p>
                     {roomTypes.map((room) => {
-                      const roomError = errorsEdit.ipdCharges && (errorsEdit.ipdCharges as any)[room]
+                      const roomError = errorsEdit.ipdCharges && (errorsEdit.ipdCharges as any)[room] as FieldError | undefined;
                       return (
                         <div key={room}>
                           <label className="block text-sm">{room.replace(/_/g, " ").toUpperCase()} Charge</label>
@@ -696,7 +833,6 @@ const AdminDoctorsPage: React.FC = () => {
                     })}
                   </div>
                 )}
-
                 {/* Update Button */}
                 <button
                   type="submit"
@@ -707,7 +843,6 @@ const AdminDoctorsPage: React.FC = () => {
                 >
                   {loading ? "Updating..." : "Update Doctor"}
                 </button>
-
                 {/* Cancel Button */}
                 <button
                   type="button"

@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useEffect, useState, useCallback } from "react"
-import { ref, onChildAdded, onChildChanged, onChildRemoved, get } from "firebase/database"
+import { ref, onChildAdded, onChildChanged, onChildRemoved, get, remove } from "firebase/database"
 import { db } from "@/lib/firebase"
 import { useRouter } from "next/navigation"
 import {
@@ -16,6 +16,8 @@ import {
   FileText,
   Clipboard,
   Stethoscope,
+  Trash2,
+  AlertCircle,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -23,6 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { format, parseISO, isValid } from "date-fns"
+import { ToastContainer, toast } from "react-toastify" // Ensure ToastContainer is imported
 
 interface ServiceItem {
   serviceName: string
@@ -43,7 +46,7 @@ export interface BillingRecord {
   patientId: string
   ipdId: string
   name: string
-  uhid?: string 
+  uhid?: string
   mobileNumber: string
   address?: string
   age?: string | number
@@ -82,6 +85,12 @@ export default function OptimizedPatientsPage() {
   const [hasLoadedDischarged, setHasLoadedDischarged] = useState<boolean>(false)
   const router = useRouter()
 
+  // State for cancellation modal
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [cancelPassword, setCancelPassword] = useState("")
+  const [cancelError, setCancelError] = useState("")
+  const [recordToCancel, setRecordToCancel] = useState<BillingRecord | null>(null)
+
   // Combine IPD info and billing info into a single record (for discharge tab)
   const combineRecordData = useCallback(
     (patientId: string, ipdId: string, ipdData: any, billingData: any): BillingRecord => {
@@ -97,7 +106,6 @@ export default function OptimizedPatientsPage() {
           })
         })
       }
-
       const paymentsArray: Payment[] = []
       if (billingData?.payments) {
         Object.keys(billingData.payments).forEach((payId) => {
@@ -110,11 +118,11 @@ export default function OptimizedPatientsPage() {
           })
         })
       }
-
       return {
         patientId,
         ipdId,
         name: ipdData.name || "Unknown",
+        uhid: ipdData.uhid || "", // Ensure UHID is included
         mobileNumber: ipdData.phone || "",
         address: ipdData.address || "",
         age: ipdData.age || "",
@@ -214,7 +222,6 @@ export default function OptimizedPatientsPage() {
       // Fetch userinfoipd (just for discharged)
       const ipdRef = ref(db, "patients/ipddetail/userinfoipd")
       const snap = await get(ipdRef)
-
       const dischargedArr: {
         patientId: string
         ipdId: string
@@ -223,7 +230,6 @@ export default function OptimizedPatientsPage() {
         dateKey: string
       }[] = []
       let sizeUserInfoIpd = 0
-
       if (snap.exists()) {
         const allDates = snap.val()
         const rawDataUserInfoIpd: any[] = []
@@ -246,16 +252,13 @@ export default function OptimizedPatientsPage() {
             })
           })
         })
-
         // Calculate size of userinfoipd discharged
         sizeUserInfoIpd = JSON.stringify(rawDataUserInfoIpd).length
-
         // Sort by dischargeDate desc, take latest 20
         dischargedArr.sort((a, b) => {
           return new Date(b.dischargeDate).getTime() - new Date(a.dischargeDate).getTime()
         })
         const top20 = dischargedArr.slice(0, ITEMS_PER_PAGE)
-
         // Fetch billing for each record
         let sizeBilling = 0
         const billingSnapshots = await Promise.all(
@@ -269,7 +272,6 @@ export default function OptimizedPatientsPage() {
           billingDataArr.push(billingData)
           return combineRecordData(entry.patientId, entry.ipdId, entry.ipdData, billingData)
         })
-
         // Calculate total downloaded size
         sizeBilling = JSON.stringify(billingDataArr).length
         setDischargedDataSize(sizeUserInfoIpd + sizeBilling)
@@ -313,7 +315,8 @@ export default function OptimizedPatientsPage() {
         (rec) =>
           rec.ipdId.toLowerCase().includes(term) ||
           rec.name.toLowerCase().includes(term) ||
-          rec.mobileNumber.toLowerCase().includes(term),
+          rec.mobileNumber.toLowerCase().includes(term) ||
+          (rec.uhid && rec.uhid.toLowerCase().includes(term)), // Include UHID in search
       )
     }
     setFilteredRecords(records)
@@ -330,20 +333,83 @@ export default function OptimizedPatientsPage() {
     const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
     router.push(`/billing/edit/${record.patientId}/${record.ipdId}/${admitDateKey}`)
   }
+
   const handleManagePatient = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
     const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
     router.push(`/manage/${record.patientId}/${record.ipdId}`)
   }
+
   const handleDrugChart = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
     const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
     router.push(`/drugchart/${record.patientId}/${record.ipdId}`)
   }
+
   const handleOTForm = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
     const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
     router.push(`/ot/${record.patientId}/${record.ipdId}/${admitDateKey}`)
+  }
+
+  // Handle Cancel Appointment button click
+  const handleCancelAppointment = (e: React.MouseEvent, record: BillingRecord) => {
+    e.stopPropagation()
+    setRecordToCancel(record)
+    setCancelPassword("")
+    setCancelError("")
+    setShowCancelModal(true)
+  }
+
+  // Confirm cancellation after password input
+  const confirmCancelAppointment = async () => {
+    if (cancelPassword !== "medford@786") {
+      setCancelError("Incorrect password.")
+      return
+    }
+
+    if (!recordToCancel) {
+      setCancelError("No record selected for cancellation.")
+      return
+    }
+
+    setIsLoading(true) // Show loading state during deletion
+    try {
+      const { patientId, ipdId, admissionDate, createdAt } = recordToCancel
+      const dateKey = getAdmitDateKey(admissionDate || createdAt)
+
+      // 1. Delete from /patients/ipdactive/{ipdId}
+      await remove(ref(db, `patients/ipdactive/${ipdId}`))
+
+      // 2. Delete from /patients/ipddetail/userinfoipd/{dateKey}/{patientId}/{ipdId}
+      await remove(ref(db, `patients/ipddetail/userinfoipd/${dateKey}/${patientId}/${ipdId}`))
+
+      // 3. Delete from /patients/ipddetail/userbillinginfoipd/{dateKey}/{patientId}/{ipdId}
+      // Check if billing record exists before attempting to delete
+      const billingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}`)
+      const billingSnap = await get(billingRef)
+      if (billingSnap.exists()) {
+        await remove(billingRef)
+      }
+
+      toast.success("IPD Appointment cancelled and records deleted successfully!", {
+        position: "top-right",
+        autoClose: 5000,
+      })
+      setShowCancelModal(false)
+      setRecordToCancel(null)
+      setCancelPassword("")
+      setCancelError("")
+    } catch (error) {
+      console.error("Error cancelling IPD appointment:", error)
+      toast.error("Failed to cancel IPD appointment.", {
+        position: "top-right",
+        autoClose: 5000,
+      })
+      setCancelError("An error occurred during cancellation.")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   // Get unique ward names from current records
@@ -362,13 +428,13 @@ export default function OptimizedPatientsPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+      <ToastContainer /> {/* Ensure ToastContainer is rendered */}
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-800 mb-2">IPD Billing Management</h1>
           <p className="text-slate-500">Manage and track in-patient billing records</p>
         </div>
-
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <Card>
@@ -382,7 +448,6 @@ export default function OptimizedPatientsPage() {
               </div>
             </CardContent>
           </Card>
-
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-slate-500">Total Deposits</CardTitle>
@@ -395,7 +460,6 @@ export default function OptimizedPatientsPage() {
             </CardContent>
           </Card>
         </div>
-
         {/* Tabs & Filters */}
         <Card className="mb-8">
           <CardContent className="p-6">
@@ -423,7 +487,6 @@ export default function OptimizedPatientsPage() {
                     </TabsTrigger>
                   </TabsList>
                 </div>
-
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
                   <Input
@@ -435,7 +498,6 @@ export default function OptimizedPatientsPage() {
                   />
                 </div>
               </div>
-
               <div className="mb-6">
                 <div className="flex items-center gap-2 mb-2">
                   <Home className="h-4 w-4 text-slate-500" />
@@ -461,7 +523,6 @@ export default function OptimizedPatientsPage() {
                   ))}
                 </div>
               </div>
-
               <TabsContent value="non-discharge" className="mt-0">
                 {renderPatientsTable(
                   filteredRecords,
@@ -470,10 +531,10 @@ export default function OptimizedPatientsPage() {
                   handleManagePatient,
                   handleDrugChart,
                   handleOTForm,
+                  handleCancelAppointment, // Pass the new handler
                   isLoading,
                 )}
               </TabsContent>
-
               <TabsContent value="discharge" className="mt-0">
                 <div className="mb-3 flex items-center gap-3">
                   <span className="text-xs text-slate-500">
@@ -490,6 +551,7 @@ export default function OptimizedPatientsPage() {
                   handleManagePatient,
                   handleDrugChart,
                   handleOTForm,
+                  handleCancelAppointment, // Pass the new handler
                   isLoading,
                 )}
               </TabsContent>
@@ -497,6 +559,66 @@ export default function OptimizedPatientsPage() {
           </CardContent>
         </Card>
       </div>
+      {/* Cancellation Confirmation Modal */}
+      {showCancelModal && recordToCancel && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+            <div className="flex justify-between items-center mb-4 border-b pb-4">
+              <h3 className="text-xl font-semibold text-red-700 flex items-center">
+                <Trash2 className="h-6 w-6 mr-2" />
+                Confirm Cancellation
+              </h3>
+              <button onClick={() => setShowCancelModal(false)} className="text-gray-500 hover:text-gray-700">
+                <XCircle className="h-6 w-6" />
+              </button>
+            </div>
+            <p className="text-gray-700 mb-4">
+              Are you sure you want to cancel the IPD appointment for{" "}
+              <span className="font-semibold">{recordToCancel.name}</span> (UHID:{" "}
+              <span className="font-semibold">{recordToCancel.uhid || recordToCancel.patientId}</span>)?
+              <br />
+              This action will permanently delete all associated records.
+            </p>
+            <div className="mb-4">
+              <label htmlFor="cancel-password" className="block text-sm font-medium text-gray-700 mb-1">
+                Enter Password to Confirm:
+              </label>
+              <Input
+                id="cancel-password"
+                type="password"
+                value={cancelPassword}
+                onChange={(e) => {
+                  setCancelPassword(e.target.value)
+                  setCancelError("") // Clear error on input change
+                }}
+                placeholder="Enter password"
+                className={cancelError ? "border-red-500" : ""}
+              />
+              {cancelError && (
+                <p className="text-red-500 text-sm mt-1 flex items-center">
+                  <AlertCircle className="h-4 w-4 mr-1" />
+                  {cancelError}
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setShowCancelModal(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={confirmCancelAppointment} disabled={isLoading}>
+                {isLoading ? (
+                  <>
+                    <div className="mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete Record"
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -508,6 +630,7 @@ function renderPatientsTable(
   handleManagePatient: (e: React.MouseEvent, record: BillingRecord) => void,
   handleDrugChart: (e: React.MouseEvent, record: BillingRecord) => void,
   handleOTForm: (e: React.MouseEvent, record: BillingRecord) => void,
+  handleCancelAppointment: (e: React.MouseEvent, record: BillingRecord) => void, // New prop
   isLoading: boolean,
 ) {
   if (isLoading) {
@@ -553,7 +676,7 @@ function renderPatientsTable(
               <td className="px-4 py-3">
                 <div className="font-medium text-slate-800">{record.name}</div>
                 <div className="text-xs text-slate-500">UHID: {record.uhid || record.patientId}</div>
-                              </td>
+              </td>
               <td className="px-4 py-3 text-slate-700">{record.mobileNumber}</td>
               <td className="px-4 py-3 font-medium text-slate-800">₹{record.amount.toLocaleString()}</td>
               <td className="px-4 py-3">
@@ -610,6 +733,18 @@ function renderPatientsTable(
                     <Stethoscope className="h-4 w-4 mr-1" />
                     OT
                   </Button>
+                  {/* New Cancel Button */}
+                  {!record.dischargeDate && ( // Only show for non-discharged patients
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={(e) => handleCancelAppointment(e, record)}
+                      className="bg-red-500 hover:bg-red-600 text-white"
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Cancel
+                    </Button>
+                  )}
                 </div>
               </td>
             </tr>

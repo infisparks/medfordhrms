@@ -5,7 +5,7 @@ import { format } from "date-fns"
 import { toWords } from "number-to-words"
 import { Download, Eye } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import type { IFormInput } from "../opd/types"
+import type { IFormInput } from "../opd/types" // Import AgeUnit
 
 interface DoctorLite {
   id: string
@@ -38,7 +38,6 @@ export function BillGenerator({
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
     const pageWidth = doc.internal.pageSize.getWidth()
     const pageHeight = doc.internal.pageSize.getHeight()
-
     // Try letterhead
     try {
       const img = new Image()
@@ -52,7 +51,6 @@ export function BillGenerator({
     } catch {
       // no letterhead
     }
-
     // Show date/time on top-right
     let yPos = 48
     doc.setFontSize(9)
@@ -64,7 +62,6 @@ export function BillGenerator({
       { align: "right" },
     )
     yPos += 8
-
     // Patient Info header
     doc.setFontSize(11)
     doc.setFont("helvetica", "bold")
@@ -72,13 +69,11 @@ export function BillGenerator({
     doc.rect(20, yPos - 2, pageWidth - 40, 6, "F")
     doc.text("PATIENT INFORMATION", 22, yPos + 2)
     yPos += 10
-
     // Info columns
     const leftX = 22
     const rightX = pageWidth / 2 + 20
     doc.setFontSize(9)
     doc.setFont("helvetica", "normal")
-
     const writePair = (label: string, value: string) => {
       doc.setFont("helvetica", "bold")
       doc.text(label, leftX, yPos)
@@ -86,6 +81,7 @@ export function BillGenerator({
       doc.text(value, leftX + 18, yPos)
       yPos += 5
     }
+
     writePair("Name:", appointmentData.name)
     writePair("Phone:", appointmentData.phone)
     writePair(
@@ -104,7 +100,7 @@ export function BillGenerator({
     doc.setFont("helvetica", "bold")
     doc.text("Age:", rightX, rightY)
     doc.setFont("helvetica", "normal")
-    doc.text(`${appointmentData.age ?? "-"} yrs`, rightX + 15, rightY)
+    doc.text(`${appointmentData.age ?? "-"} ${appointmentData.ageUnit || "years"}`, rightX + 15, rightY) // Display age with unit
     yPos = Math.max(yPos, rightY) + 5
 
     // Table header
@@ -118,7 +114,6 @@ export function BillGenerator({
     doc.text("Details", 125, yPos + 1)
     doc.text("Amount", pageWidth - 22, yPos + 1, { align: "right" })
     yPos += 7
-
     doc.setFont("helvetica", "normal")
     let totalCharges = 0
     appointmentData.modalities?.forEach((m, i) => {
@@ -145,7 +140,6 @@ export function BillGenerator({
       totalCharges += amt
       yPos += 4
     })
-
     yPos += 7
     // Payment summary
     doc.setFontSize(11)
@@ -154,7 +148,6 @@ export function BillGenerator({
     doc.rect(20, yPos - 2, pageWidth - 40, 6, "F")
     doc.text("PAYMENT SUMMARY", 22, yPos + 2)
     yPos += 10
-
     const discount = Number(appointmentData.discount) || 0
     const cash = Number(appointmentData.cashAmount) || 0
     const online = Number(appointmentData.onlineAmount) || 0
@@ -184,7 +177,6 @@ export function BillGenerator({
     doc.text("Net Amount:", sx - 35, yPos)
     doc.text(`Rs. ${net}`, pageWidth - 22, yPos, { align: "right" })
     yPos += 5
-
     // Paid breakdown
     if (appointmentData.appointmentType === "visithospital") {
       doc.setFont("helvetica", "normal")
@@ -198,15 +190,18 @@ export function BillGenerator({
         line("Online Paid:", online)
       } else if (appointmentData.paymentMethod === "cash") {
         line("Cash Paid:", cash)
-      } else {
-        line("Online Paid:", online)
+      } else if (
+        appointmentData.paymentMethod === "online" ||
+        appointmentData.paymentMethod === "card-credit" ||
+        appointmentData.paymentMethod === "card-debit"
+      ) {
+        line(appointmentData.paymentMethod === "online" ? "Online Paid:" : "Card Paid:", online)
       }
       doc.setFont("helvetica", "bold")
       doc.text("Total Paid:", sx - 35, yPos)
       doc.text(`Rs. ${paid}`, pageWidth - 22, yPos, { align: "right" })
       yPos += 5
     }
-
     // Due amount
     if (due > 0) {
       doc.setFont("helvetica", "bold")
@@ -216,12 +211,10 @@ export function BillGenerator({
       doc.setTextColor(0, 0, 0)
       yPos += 5
     }
-
     // Amounts in words
     doc.setFontSize(9)
     doc.setFont("helvetica", "italic")
     const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
-
     yPos += 5
     doc.text(`Total Paid (in words): ${capitalize(toWords(paid))} only`, 20, yPos)
     yPos += 5
@@ -229,7 +222,6 @@ export function BillGenerator({
       doc.text(`Due Amount (in words): ${capitalize(toWords(due))} only`, 20, yPos)
       yPos += 5
     }
-
     // Save
     const fname = `Bill_${appointmentData.name.replace(/\s+/g, "_")}__${format(appointmentData.date, "ddMMyyyy")}.pdf`
     doc.save(fname)
@@ -239,7 +231,6 @@ export function BillGenerator({
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
     const pageWidth = doc.internal.pageSize.getWidth()
     const pageHeight = doc.internal.pageSize.getHeight()
-
     // Try letterhead
     try {
       const img = new Image()
@@ -250,10 +241,7 @@ export function BillGenerator({
         img.src = "/letterhead.png"
       })
       doc.addImage(img, "PNG", 0, 0, pageWidth, pageHeight)
-    } catch {
-      // no letterhead
-    }
-
+    } catch {}
     // Show date/time on top-right
     let yPos = 55
     doc.setFontSize(9)
@@ -265,7 +253,6 @@ export function BillGenerator({
       { align: "right" },
     )
     yPos += 8
-
     // Patient Info header
     doc.setFontSize(11)
     doc.setFont("helvetica", "bold")
@@ -273,13 +260,11 @@ export function BillGenerator({
     doc.rect(20, yPos - 2, pageWidth - 40, 6, "F")
     doc.text("PATIENT INFORMATION", 22, yPos + 2)
     yPos += 10
-
     // Info columns
     const leftX = 22
     const rightX = pageWidth / 2 + 20
     doc.setFontSize(9)
     doc.setFont("helvetica", "normal")
-
     const writePair = (label: string, value: string) => {
       doc.setFont("helvetica", "bold")
       doc.text(label, leftX, yPos)
@@ -287,6 +272,7 @@ export function BillGenerator({
       doc.text(value, leftX + 18, yPos)
       yPos += 5
     }
+
     writePair("Name:", appointmentData.name)
     writePair("Phone:", appointmentData.phone)
     writePair(
@@ -305,7 +291,7 @@ export function BillGenerator({
     doc.setFont("helvetica", "bold")
     doc.text("Age:", rightX, rightY)
     doc.setFont("helvetica", "normal")
-    doc.text(`${appointmentData.age ?? "-"} yrs`, rightX + 15, rightY)
+    doc.text(`${appointmentData.age ?? "-"} ${appointmentData.ageUnit || "years"}`, rightX + 15, rightY) // Display age with unit
     yPos = Math.max(yPos, rightY) + 5
 
     // Table header
@@ -319,7 +305,6 @@ export function BillGenerator({
     doc.text("Details", 125, yPos + 1)
     doc.text("Amount", pageWidth - 22, yPos + 1, { align: "right" })
     yPos += 7
-
     doc.setFont("helvetica", "normal")
     let totalCharges = 0
     appointmentData.modalities?.forEach((m, i) => {
@@ -346,7 +331,6 @@ export function BillGenerator({
       totalCharges += amt
       yPos += 4
     })
-
     yPos += 7
     // Payment summary
     doc.setFontSize(11)
@@ -355,7 +339,6 @@ export function BillGenerator({
     doc.rect(20, yPos - 2, pageWidth - 40, 6, "F")
     doc.text("PAYMENT SUMMARY", 22, yPos + 2)
     yPos += 10
-
     const discount = Number(appointmentData.discount) || 0
     const cash = Number(appointmentData.cashAmount) || 0
     const online = Number(appointmentData.onlineAmount) || 0
@@ -385,7 +368,6 @@ export function BillGenerator({
     doc.text("Net Amount:", sx - 35, yPos)
     doc.text(`Rs. ${net}`, pageWidth - 22, yPos, { align: "right" })
     yPos += 5
-
     // Paid breakdown
     if (appointmentData.appointmentType === "visithospital") {
       doc.setFont("helvetica", "normal")
@@ -399,15 +381,18 @@ export function BillGenerator({
         line("Online Paid:", online)
       } else if (appointmentData.paymentMethod === "cash") {
         line("Cash Paid:", cash)
-      } else {
-        line("Online Paid:", online)
+      } else if (
+        appointmentData.paymentMethod === "online" ||
+        appointmentData.paymentMethod === "card-credit" ||
+        appointmentData.paymentMethod === "card-debit"
+      ) {
+        line(appointmentData.paymentMethod === "online" ? "Online Paid:" : "Card Paid:", online)
       }
       doc.setFont("helvetica", "bold")
       doc.text("Total Paid:", sx - 35, yPos)
       doc.text(`Rs. ${paid}`, pageWidth - 22, yPos, { align: "right" })
       yPos += 5
     }
-
     // Due amount
     if (due > 0) {
       doc.setFont("helvetica", "bold")
@@ -417,12 +402,10 @@ export function BillGenerator({
       doc.setTextColor(0, 0, 0)
       yPos += 5
     }
-
     // Amounts in words
     doc.setFontSize(9)
     doc.setFont("helvetica", "italic")
     const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
-
     yPos += 5
     doc.text(`Total Paid (in words): ${capitalize(toWords(paid))} only`, 20, yPos)
     yPos += 5
@@ -430,11 +413,9 @@ export function BillGenerator({
       doc.text(`Due Amount (in words): ${capitalize(toWords(due))} only`, 20, yPos)
       yPos += 5
     }
-
     // Generate blob and open in new tab
     const pdfBlob = doc.output("blob")
     const blobUrl = URL.createObjectURL(pdfBlob)
-
     // Open in new tab
     const newWindow = window.open(blobUrl, "_blank")
     if (newWindow) {

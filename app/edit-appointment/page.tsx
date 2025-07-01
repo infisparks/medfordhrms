@@ -1,4 +1,5 @@
 "use client"
+
 import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { db, auth } from "@/lib/firebase"
@@ -8,12 +9,13 @@ import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
 import { ArrowLeft, Save, User, Clock, AlertCircle } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
+
 import { EditAppointmentForm } from "./edit-appointment-form"
 import type { IFormInput, Doctor, ModalitySelection } from "../opd/types"
+
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { format } from "date-fns"
 
 function formatAMPM(date: Date): string {
   let hours = date.getHours()
@@ -42,7 +44,8 @@ export default function EditAppointmentPage() {
     defaultValues: {
       name: "",
       phone: "",
-      age: 0,
+      age: undefined, // Changed to undefined for optional number
+      ageUnit: "years", // Added default age unit
       gender: "",
       address: "",
       date: new Date(),
@@ -63,6 +66,7 @@ export default function EditAppointmentPage() {
     },
     mode: "onChange",
   })
+
   const { handleSubmit, reset } = form
 
   // Auth listener
@@ -129,11 +133,9 @@ export default function EditAppointmentPage() {
         return
       }
       if (doctors.length === 0) return // Wait for doctors to load
-
       setIsLoading(true)
       try {
         let foundDateKey = dateKey
-
         // If we don't already have dateKey, scan all dates for this appointment
         if (!foundDateKey) {
           const opdRef = ref(db, `patients/opddetail`)
@@ -145,11 +147,11 @@ export default function EditAppointmentPage() {
           }
           const opdData = opdSnap.val()
           // Scan all dates to find this UHID/ID combo
-          outer: for (const dateK of Object.keys(opdData)) {
+          for (const dateK of Object.keys(opdData)) {
             const uhidData = opdData[dateK]?.[uhid]
             if (uhidData && uhidData[appointmentId]) {
               foundDateKey = dateK
-              break outer
+              break
             }
           }
           if (!foundDateKey) {
@@ -159,7 +161,6 @@ export default function EditAppointmentPage() {
           }
           setDateKey(foundDateKey)
         }
-
         // Now, load appointment data using foundDateKey
         const appointmentRef = ref(db, `patients/opddetail/${foundDateKey}/${uhid}/${appointmentId}`)
         const appointmentSnap = await get(appointmentRef)
@@ -169,7 +170,6 @@ export default function EditAppointmentPage() {
           return
         }
         const appointmentData = appointmentSnap.val()
-
         // Patient info
         const patientRef = ref(db, `patients/patientinfo/${uhid}`)
         const patientSnap = await get(patientRef)
@@ -206,7 +206,8 @@ export default function EditAppointmentPage() {
         reset({
           name: appointmentData.name || patientData.name || "",
           phone: appointmentData.phone || patientData.phone || "",
-          age: Number(patientData.age ?? appointmentData.age ?? 0),
+          age: Number(patientData.age ?? appointmentData.age ?? undefined),
+          ageUnit: patientData.ageUnit || appointmentData.ageUnit || "years", // Load age unit
           gender: patientData.gender || appointmentData.gender || "",
           address: patientData.address || appointmentData.address || "",
           date: new Date(appointmentData.date),
@@ -255,6 +256,7 @@ export default function EditAppointmentPage() {
         name: data.name,
         phone: data.phone,
         age: data.age,
+        ageUnit: data.ageUnit, // Save age unit
         gender: data.gender,
         address: data.address,
         updatedAt: new Date().toISOString(),
@@ -275,6 +277,7 @@ export default function EditAppointmentPage() {
           charges: modality.charges,
         }
       })
+
       const mainDoctorName = data.doctor ? doctors.find((d) => d.id === data.doctor)?.name || data.doctor : null
 
       // Update appointment data (always use dateKey)
@@ -295,7 +298,9 @@ export default function EditAppointmentPage() {
         lastModifiedBy: currentUserEmail || "unknown",
         lastModifiedAt: new Date().toISOString(),
       }
+
       await update(ref(db, `patients/opddetail/${dateKey}/${uhid}/${appointmentId}`), updatedAppointmentData)
+
       if (data.appointmentType === "visithospital") {
         await update(ref(db, `patients/opddetail/${dateKey}/${uhid}/${appointmentId}/payment`), {
           cashAmount: cash,
@@ -307,6 +312,7 @@ export default function EditAppointmentPage() {
           updatedAt: new Date().toISOString(),
         })
       }
+
       // Log the change
       const changesRef = ref(db, "opdChanges")
       const newChangeRef = push(changesRef)
@@ -319,6 +325,7 @@ export default function EditAppointmentPage() {
         editedAt: new Date().toISOString(),
         changes: updatedAppointmentData,
       })
+
       toast.success("Appointment updated successfully!")
       setTimeout(() => {
         router.push("/opdlist")
@@ -380,7 +387,6 @@ export default function EditAppointmentPage() {
   return (
     <>
       <ToastContainer />
-
       {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 py-4">
@@ -409,7 +415,6 @@ export default function EditAppointmentPage() {
           </div>
         </div>
       </div>
-
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         <Card className="shadow-lg border-0">
@@ -424,7 +429,6 @@ export default function EditAppointmentPage() {
                 appointmentId={appointmentId || undefined}
                 patientId={uhid || undefined}
               />
-
               <div className="flex justify-between pt-6 border-t bg-gray-50 -mx-6 px-6 -mb-6 pb-6">
                 <Button
                   type="button"

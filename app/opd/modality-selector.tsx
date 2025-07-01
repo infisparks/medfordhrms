@@ -1,14 +1,20 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useCallback, useMemo } from "react"
+
 import { Plus, Edit2, Check, DollarSign, Trash2, IndianRupeeIcon } from "lucide-react"
+
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+
 import { SearchDropdown } from "./Component/search-dropdown"
 import { DoctorSearchDropdown } from "./Component/doctor-search-dropdown"
+
 import {
   ModalityOptions,
   VisitTypeOptions,
@@ -17,6 +23,7 @@ import {
   IPDServiceOptions,
   RadiologyServiceOptions,
   Casualty,
+  CardiologyStudyOptions, // Import new options
   type ModalitySelection,
   type Doctor,
   type ServiceOption,
@@ -66,6 +73,8 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
         return RadiologyServiceOptions
       case "casualty":
         return Casualty
+      case "cardiology": // New case for cardiology
+        return CardiologyStudyOptions
       default:
         return []
     }
@@ -153,9 +162,9 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
 
   // Handle scroll event to prevent default behavior on number inputs
   const handleWheel = useCallback((e: React.WheelEvent<HTMLInputElement>) => {
-    e.currentTarget.blur(); // Remove focus to stop scroll
-    e.preventDefault(); // Prevent default scroll behavior
-  }, []);
+    e.currentTarget.blur() // Remove focus to stop scroll
+    e.preventDefault() // Prevent default scroll behavior
+  }, [])
 
   // Calculate total charges
   const getTotalCharges = useCallback(() => {
@@ -228,7 +237,6 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                         placeholder="Search & select specialist"
                       />
                     </div>
-
                     {/* Doctor (searchable, already present) */}
                     {modality.specialist && (
                       <div className="space-y-1">
@@ -244,7 +252,6 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                         />
                       </div>
                     )}
-
                     {/* Visit Type */}
                     {modality.doctor && (
                       <div className="space-y-1">
@@ -270,7 +277,6 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                         </select>
                       </div>
                     )}
-
                     {/* Charges */}
                     <div className="space-y-1">
                       <Label className="text-xs font-medium text-gray-600">Charges</Label>
@@ -442,7 +448,6 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
               </CardContent>
             </Card>
           ))}
-
           {/* Total Summary */}
           <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
             <CardContent className="p-4">
@@ -457,7 +462,6 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
           </Card>
         </div>
       )}
-
       {modalities.length === 0 && (
         <Card className="border-dashed border-2 border-gray-300">
           <CardContent className="pt-6 pb-6">

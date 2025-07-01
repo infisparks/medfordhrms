@@ -118,11 +118,11 @@
        }
    
        /* ---------- Title ---------- */
-       doc
-         .setFont("Helvetica", "bold")
-         .setFontSize(14)
-         .setTextColor(0, 0, 128)
-         .text("Patient's Admission Summary", pageWidth / 2, y, { align: "center" })
+      //  doc
+      //    .setFont("Helvetica", "bold")
+      //    .setFontSize(14)
+      //    .setTextColor(0, 0, 128)
+      //    .text("Patient's Admission Summary", pageWidth / 2, y, { align: "center" })
        y += lh + 8
        sep()
    

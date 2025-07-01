@@ -1,18 +1,38 @@
 "use client"
 
-import { useEffect, useRef, useCallback, useMemo } from "react"
+import { useEffect, useCallback, useMemo } from "react"
 import { type UseFormReturn, Controller } from "react-hook-form"
-import { type IFormInput, GenderOptions, PaymentOptions } from "../opd/types"
-import { Phone, Cake, MapPin, Clock, MessageSquare, IndianRupeeIcon, PersonStandingIcon as PersonIcon, CalendarIcon, User, CreditCard, FileText, Hospital, PhoneCall } from 'lucide-react'
+import { type IFormInput, GenderOptions, PaymentOptions, AgeUnitOptions } from "../opd/types"
+import { DoctorSearchDropdown } from "../opd/Component/doctor-search-dropdown" // Fixed import
+
+import {
+  Phone,
+  Cake,
+  MapPin,
+  Clock,
+  MessageSquare,
+  IndianRupeeIcon,
+  PersonStandingIcon as PersonIcon,
+  CalendarIcon,
+  User,
+  CreditCard,
+  FileText,
+  Hospital,
+  PhoneCall,
+} from "lucide-react"
+
 import DatePicker from "react-datepicker"
 import "react-datepicker/dist/react-datepicker.css"
+
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+
 import { ModalitySelector } from "../opd/modality-selector"
 import { BillGenerator } from "./bill-generator"
+
 import type { Doctor } from "../opd/types"
 
 interface EditAppointmentFormProps {
@@ -79,57 +99,47 @@ export function EditAppointmentForm({ form, doctors, appointmentId, patientId }:
   }, [watchedModalities.length, watchedAppointmentType, totalModalityCharges, setValue])
 
   // Fixed payment calculation logic
- // 1) Shift the total paid into the newly selected method
-useEffect(() => {
-  if (watchedAppointmentType !== "visithospital") return;
+  // 1) Shift the total paid into the newly selected method
+  useEffect(() => {
+    if (watchedAppointmentType !== "visithospital") return
 
-  // Sum whatever's currently entered
-  const cash = Number(watch("cashAmount")) || 0;
-  const online = Number(watch("onlineAmount")) || 0;
-  const totalPaid = cash + online;
+    // Sum whatever's currently entered
+    const cash = Number(watch("cashAmount")) || 0
+    const online = Number(watch("onlineAmount")) || 0
+    const totalPaid = cash + online
 
-  if (watchedPaymentMethod === "cash") {
-    // Move all paid into cash, zero out online
-    setValue("cashAmount", totalPaid);
-    setValue("onlineAmount", 0);
-  } else if (watchedPaymentMethod === "online") {
-    // Move all paid into online, zero out cash
-    setValue("onlineAmount", totalPaid);
-    setValue("cashAmount", 0);
-  }
-}, [
-  watchedAppointmentType,
-  watchedPaymentMethod,
-  setValue,
-  watch,
-]);
+    if (watchedPaymentMethod === "cash") {
+      // Move all paid into cash, zero out online
+      setValue("cashAmount", totalPaid)
+      setValue("onlineAmount", 0)
+    } else if (
+      watchedPaymentMethod === "online" ||
+      watchedPaymentMethod === "card-credit" ||
+      watchedPaymentMethod === "card-debit"
+    ) {
+      // Move all paid into online, zero out cash
+      setValue("onlineAmount", totalPaid)
+      setValue("cashAmount", 0)
+    }
+  }, [watchedAppointmentType, watchedPaymentMethod, setValue, watch])
 
-// 2) Recalculate discount any time the paid amounts or total charges change
-useEffect(() => {
-  if (watchedAppointmentType !== "visithospital") return;
+  // 2) Recalculate discount any time the paid amounts or total charges change
+  useEffect(() => {
+    if (watchedAppointmentType !== "visithospital") return
 
-  const totalCharges = totalModalityCharges;
-  const cashAmount = Number(watchedCashAmount) || 0;
-  const onlineAmount = Number(watchedOnlineAmount) || 0;
-  const totalPaid = cashAmount + onlineAmount;
+    const totalCharges = totalModalityCharges
+    const cashAmount = Number(watchedCashAmount) || 0
+    const onlineAmount = Number(watchedOnlineAmount) || 0
+    const totalPaid = cashAmount + onlineAmount
 
-  // Discount is whatever is left if paid < charges
-  const discount = totalPaid < totalCharges
-    ? totalCharges - totalPaid
-    : 0;
+    // Discount is whatever is left if paid < charges
+    const discount = totalPaid < totalCharges ? totalCharges - totalPaid : 0
 
-  // Only set it if it's actually different
-  if (watch("discount") !== discount) {
-    setValue("discount", discount);
-  }
-}, [
-  watchedAppointmentType,
-  totalModalityCharges,
-  watchedCashAmount,
-  watchedOnlineAmount,
-  setValue,
-  watch,
-]);
+    // Only set it if it's actually different
+    if (watch("discount") !== discount) {
+      setValue("discount", discount)
+    }
+  }, [watchedAppointmentType, totalModalityCharges, watchedCashAmount, watchedOnlineAmount, setValue, watch])
 
   // Fixed calculation: Final amount = Cash + Online (total amount paid)
   const calculateTotalAmount = () => {
@@ -168,7 +178,6 @@ useEffect(() => {
               </div>
               {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
             </div>
-
             {/* Phone */}
             <div className="space-y-2">
               <Label htmlFor="phone" className="text-sm font-medium">
@@ -193,7 +202,6 @@ useEffect(() => {
               </div>
               {errors.phone && <p className="text-sm text-red-500">{errors.phone.message}</p>}
             </div>
-
             {/* Age */}
             <div className="space-y-2">
               <Label htmlFor="age" className="text-sm font-medium">
@@ -206,15 +214,42 @@ useEffect(() => {
                   type="number"
                   {...register("age", {
                     required: "Age is required",
-                    min: { value: 1, message: "Age must be positive" },
+                    min: { value: 0, message: "Age must be positive" },
+                    valueAsNumber: true,
                   })}
                   placeholder="Enter age"
                   className={`pl-10 ${errors.age ? "border-red-500" : ""}`}
+                  onWheel={(e) => e.currentTarget.blur()}
                 />
               </div>
               {errors.age && <p className="text-sm text-red-500">{errors.age.message}</p>}
             </div>
-
+            {/* Age Unit - New Field */}
+            <div className="space-y-2">
+              <Label htmlFor="ageUnit" className="text-sm font-medium">
+                Age Unit <span className="text-red-500">*</span>
+              </Label>
+              <Controller
+                control={control}
+                name="ageUnit"
+                rules={{ required: "Age unit is required" }}
+                render={({ field }) => (
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <SelectTrigger className={errors.ageUnit ? "border-red-500" : ""}>
+                      <SelectValue placeholder="Select unit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AgeUnitOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {errors.ageUnit && <p className="text-sm text-red-500">{errors.ageUnit.message}</p>}
+            </div>
             {/* Gender */}
             <div className="space-y-2">
               <Label htmlFor="gender" className="text-sm font-medium">
@@ -242,7 +277,25 @@ useEffect(() => {
               {errors.gender && <p className="text-sm text-red-500">{errors.gender.message}</p>}
             </div>
           </div>
-
+          {/* Consulting Doctor - New Field */}
+          <div className="space-y-2">
+            <Label htmlFor="doctor" className="text-sm font-medium">
+              Consulting Doctor (Optional)
+            </Label>
+            <Controller
+              control={control}
+              name="doctor"
+              render={({ field }) => (
+                <DoctorSearchDropdown
+                  doctors={doctors}
+                  value={field.value || ""}
+                  onSelect={field.onChange}
+                  placeholder="Select consulting doctor"
+                />
+              )}
+            />
+            {errors.doctor && <p className="text-sm text-red-500">{errors.doctor.message}</p>}
+          </div>
           {/* Appointment Type and Date/Time Row */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Appointment Type */}
@@ -289,7 +342,6 @@ useEffect(() => {
                 </div>
               </div>
             </div>
-
             {/* Date, Time, and Referred By */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
@@ -317,7 +369,6 @@ useEffect(() => {
                 </div>
                 {errors.date && <p className="text-sm text-red-500">{errors.date.message}</p>}
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="time" className="text-sm font-medium">
                   Time <span className="text-red-500">*</span>
@@ -330,11 +381,11 @@ useEffect(() => {
                     {...register("time", { required: "Time is required" })}
                     placeholder="10:30 AM"
                     className={`pl-10 ${errors.time ? "border-red-500" : ""}`}
+                    defaultValue={formatAMPM(new Date())}
                   />
                 </div>
                 {errors.time && <p className="text-sm text-red-500">{errors.time.message}</p>}
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="referredBy" className="text-sm font-medium">
                   Referred By
@@ -343,7 +394,6 @@ useEffect(() => {
               </div>
             </div>
           </div>
-
           {/* Address - Only for hospital visits */}
           {watchedAppointmentType === "visithospital" && (
             <div className="space-y-2">
@@ -363,7 +413,6 @@ useEffect(() => {
           )}
         </CardContent>
       </Card>
-
       {/* Medical Services Section */}
       <Card className="border-l-4 border-l-green-500">
         <CardHeader className="pb-4">
@@ -382,7 +431,6 @@ useEffect(() => {
                 if (!modalities || modalities.length === 0) {
                   return "At least one service is required"
                 }
-
                 for (const modality of modalities) {
                   if (modality.type === "consultation") {
                     if (!modality.specialist) return "Specialist is required for consultation"
@@ -394,7 +442,8 @@ useEffect(() => {
                       modality.type === "xray" ||
                       modality.type === "pathology" ||
                       modality.type === "ipd" ||
-                      modality.type === "radiology") &&
+                      modality.type === "radiology" ||
+                      modality.type === "cardiology") && // Added cardiology
                     !modality.service
                   ) {
                     return `Service is required for ${modality.type}`
@@ -410,7 +459,6 @@ useEffect(() => {
           {errors.modalities && <p className="text-sm text-red-500 mt-2">{errors.modalities.message}</p>}
         </CardContent>
       </Card>
-
       {/* Payment Section - Only for hospital visits */}
       {watchedAppointmentType === "visithospital" && (
         <Card className="border-l-4 border-l-purple-500">
@@ -448,7 +496,6 @@ useEffect(() => {
                 />
                 {errors.paymentMethod && <p className="text-sm text-red-500">{errors.paymentMethod.message}</p>}
               </div>
-
               {/* Total Charges Display */}
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Total Charges</Label>
@@ -461,7 +508,6 @@ useEffect(() => {
                   />
                 </div>
               </div>
-
               {/* Amount Fields */}
               {watchedPaymentMethod === "mixed" ? (
                 <>
@@ -481,12 +527,11 @@ useEffect(() => {
                           min: { value: 0, message: "Amount must be positive" },
                           valueAsNumber: true,
                         })}
-                        onWheel={e => e.currentTarget.blur()}
+                        onWheel={(e) => e.currentTarget.blur()}
                       />
                     </div>
                     {errors.cashAmount && <p className="text-sm text-red-500">{errors.cashAmount.message}</p>}
                   </div>
-
                   <div className="space-y-2">
                     <Label htmlFor="onlineAmount" className="text-sm font-medium">
                       Online Amount <span className="text-red-500">*</span>
@@ -503,30 +548,33 @@ useEffect(() => {
                           min: { value: 0, message: "Amount must be positive" },
                           valueAsNumber: true,
                         })}
-                        onWheel={e => e.currentTarget.blur()}
+                        onWheel={(e) => e.currentTarget.blur()}
                       />
                     </div>
                     {errors.onlineAmount && <p className="text-sm text-red-500">{errors.onlineAmount.message}</p>}
                   </div>
                 </>
-              ) : watchedPaymentMethod === "online" ? (
+              ) : watchedPaymentMethod === "online" ||
+                watchedPaymentMethod === "card-credit" ||
+                watchedPaymentMethod === "card-debit" ? (
                 <div className="space-y-2">
                   <Label htmlFor="onlineAmount" className="text-sm font-medium">
-                    Online Amount <span className="text-red-500">*</span>
+                    {watchedPaymentMethod === "online" ? "Online Amount" : "Card Amount"}{" "}
+                    <span className="text-red-500">*</span>
                   </Label>
                   <div className="relative">
                     <IndianRupeeIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                     <Input
                       id="onlineAmount"
                       type="number"
-                      placeholder="Online amount"
+                      placeholder={watchedPaymentMethod === "online" ? "Online amount" : "Card amount"}
                       className={`pl-10 ${errors.onlineAmount ? "border-red-500" : ""}`}
                       {...register("onlineAmount", {
-                        required: "Online amount is required",
+                        required: "Amount is required",
                         min: { value: 0, message: "Amount must be positive" },
                         valueAsNumber: true,
                       })}
-                      onWheel={e => e.currentTarget.blur()}
+                      onWheel={(e) => e.currentTarget.blur()}
                     />
                   </div>
                   {errors.onlineAmount && <p className="text-sm text-red-500">{errors.onlineAmount.message}</p>}
@@ -548,13 +596,12 @@ useEffect(() => {
                         min: { value: 0, message: "Amount must be positive" },
                         valueAsNumber: true,
                       })}
-                      onWheel={e => e.currentTarget.blur()}
+                      onWheel={(e) => e.currentTarget.blur()}
                     />
                   </div>
                   {errors.cashAmount && <p className="text-sm text-red-500">{errors.cashAmount.message}</p>}
                 </div>
               )}
-
               {/* Discount */}
               <div className="space-y-2">
                 <Label htmlFor="discount" className="text-sm font-medium">
@@ -577,7 +624,6 @@ useEffect(() => {
                 {errors.discount && <p className="text-sm text-red-500">{errors.discount.message}</p>}
               </div>
             </div>
-
             {/* Payment Summary */}
             {totalModalityCharges > 0 && (
               <Card className="bg-gradient-to-r from-green-50 to-blue-50 border-green-200">
@@ -594,26 +640,27 @@ useEffect(() => {
                       </div>
                       <div className="flex justify-between">
                         <span>Amount to Pay:</span>
-                        <span className="font-semibold">₹{totalModalityCharges - (Number(watch("discount")) || 0)}</span>
+                        <span className="font-semibold">
+                          ₹{totalModalityCharges - (Number(watch("discount")) || 0)}
+                        </span>
                       </div>
                       <div className="flex justify-between text-lg font-bold text-green-700">
                         <span>Amount Paid:</span>
                         <span>₹{calculateTotalAmount()}</span>
                       </div>
                     </div>
-                    
+
                     {/* Bill Download Button */}
                     <div className="ml-4">
-                    <BillGenerator
-  appointmentData={formData}
-  appointmentId={appointmentId}
-  patientId={patientId}
-  doctors={doctors}         
-  className="bg-blue-600 hover:bg-blue-700 text-white"
-/>
+                      <BillGenerator
+                        appointmentData={formData}
+                        appointmentId={appointmentId}
+                        patientId={patientId}
+                        doctors={doctors}
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
+                      />
                     </div>
                   </div>
-
                   {/* Payment Breakdown */}
                   <div className="pt-3 border-t border-green-200">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs text-gray-600">
@@ -635,9 +682,11 @@ useEffect(() => {
                           <span>₹{Number(watchedCashAmount) || 0}</span>
                         </div>
                       )}
-                      {watchedPaymentMethod === "online" && (
+                      {(watchedPaymentMethod === "online" ||
+                        watchedPaymentMethod === "card-credit" ||
+                        watchedPaymentMethod === "card-debit") && (
                         <div className="flex justify-between">
-                          <span>Online Paid:</span>
+                          <span>{watchedPaymentMethod === "online" ? "Online Paid" : "Card Paid"}:</span>
                           <span>₹{Number(watchedOnlineAmount) || 0}</span>
                         </div>
                       )}
@@ -649,7 +698,6 @@ useEffect(() => {
           </CardContent>
         </Card>
       )}
-
       {/* Notes Section */}
       <Card className="border-l-4 border-l-orange-500">
         <CardHeader className="pb-4">

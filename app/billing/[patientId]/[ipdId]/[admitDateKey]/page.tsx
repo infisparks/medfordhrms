@@ -22,7 +22,7 @@ import { motion, AnimatePresence } from "framer-motion"
 
 import { CheckCircle } from "lucide-react"
 
-// ***** IMPORTANT: Use CreatableSelect from react-select/creatable
+// ***** IMPORTANT: Use CreatableSelect from react-select/creatable"
 
 import CreatableSelect from "react-select/creatable"
 
@@ -62,36 +62,50 @@ import { format, parseISO } from "date-fns"
 import { Dialog, Transition } from "@headlessui/react"
 
 import InvoiceDownload from "../../../InvoiceDownload"
-import BulkServiceModal from "./bulk-service-modal" // NEW: Import BulkServiceModal
+
+import BulkServiceModal from "./bulk-service-modal"
 
 // ===== Interfaces =====
 
 interface ServiceItem {
   serviceName: string
+
   doctorName?: string
+
   type: "service" | "doctorvisit"
+
   amount: number
+
   createdAt?: string
 }
 
 interface Payment {
   id?: string // Changed to optional string to match Firebase key behavior
+
   amount: number
+
   paymentType: string
+
   type: "advance" | "refund"
+
   date: string
 }
 
 interface AdditionalServiceForm {
   serviceName: string
+
   amount: number
+
   quantity: number // NEW: Added quantity field
 }
 
 interface PaymentForm {
   paymentAmount: number
+
   paymentType: string
+
   type: string
+
   sendWhatsappNotification: boolean // NEW: Added for WhatsApp checkbox
 }
 
@@ -101,41 +115,72 @@ interface DiscountForm {
 
 interface DoctorVisitForm {
   doctorId?: string
+
   visitCharge: number
+
   visitTimes: number
+
   customDoctorName?: string
+
   isCustomDoctor: boolean
 }
 
 export interface BillingRecord {
   patientId: string
+
   uhid: string
+
   ipdId: string
+
   name: string
+
   mobileNumber: string
+
   address?: string
+
   age?: string | number
+  ageUnit?: string // ADDED: ageUnit to BillingRecord interface
+
   gender?: string
+
   relativeName?: string
+
   relativePhone?: string
+
   relativeAddress?: string
+
   dischargeDate?: string
+
   amount: number // deposit total
+
   paymentType: string // not used heavily here, but kept
+
   roomType?: string
+
   bed?: string
+
   services: ServiceItem[]
+
   payments: Payment[]
+
   discount?: number
+
   admitDate?: string
+
   createdAt?: string
+
+  doctor?: string // NEW: Add doctor ID from IPD info
 }
 
 // Define the structure for a parsed service item from Gemini (for BulkServiceModal)
+
 interface ParsedServiceItem {
   id: string // Added for dnd to uniquely identify items
+
   serviceName: string
+
   quantity: number
+
   amount: number
 }
 
@@ -144,11 +189,13 @@ interface ParsedServiceItem {
 const additionalServiceSchema = yup
   .object({
     serviceName: yup.string().required("Service Name is required"),
+
     amount: yup
       .number()
       .typeError("Amount must be a number")
       .positive("Must be positive")
       .required("Amount is required"),
+
     quantity: yup // NEW: Added quantity validation
       .number()
       .typeError("Quantity must be a number")
@@ -165,8 +212,11 @@ const paymentSchema = yup
       .typeError("Amount must be a number")
       .positive("Must be positive")
       .required("Amount is required"),
+
     paymentType: yup.string().required("Payment Type is required"),
+
     type: yup.string().required("Type is required"),
+
     sendWhatsappNotification: yup.boolean().required(), // NEW: Added validation for checkbox
   })
   .required()
@@ -185,25 +235,33 @@ const doctorVisitSchema = yup
   .object({
     doctorId: yup.string().when("isCustomDoctor", {
       is: false,
+
       then: (schema) => schema.required("Select a doctor"),
+
       otherwise: (schema) => schema.notRequired(),
     }),
+
     visitCharge: yup
       .number()
       .typeError("Visit charge must be a number")
       .positive("Must be positive")
       .required("Charge is required"),
+
     visitTimes: yup
       .number()
       .typeError("Visit times must be a number")
       .min(1, "Must be at least 1")
       .max(10, "Cannot exceed 10 visits")
       .required("Visit times is required"),
+
     customDoctorName: yup.string().when("isCustomDoctor", {
       is: true,
+
       then: (schema) => schema.required("Doctor name is required"),
+
       otherwise: (schema) => schema.notRequired(),
     }),
+
     isCustomDoctor: yup.boolean().required(),
   })
   .required()
@@ -212,93 +270,142 @@ const doctorVisitSchema = yup
 
 interface IDoctor {
   id: string
+
   name: string
+
   specialist: string
+
   department: "OPD" | "IPD" | "Both"
+
   opdCharge?: number
+
   ipdCharges?: Record<string, number>
 }
 
 export default function BillingPage() {
   const { patientId, ipdId, admitDateKey } = useParams() as { patientId: string; ipdId: string; admitDateKey: string }
+
   const router = useRouter()
+
   const [selectedRecord, setSelectedRecord] = useState<BillingRecord | null>(null)
+
   const [loading, setLoading] = useState(false)
+
   const [isPaymentHistoryOpen, setIsPaymentHistoryOpen] = useState(false)
+
   const [beds, setBeds] = useState<any>({})
+
   const [doctors, setDoctors] = useState<IDoctor[]>([])
+
   const [activeTab, setActiveTab] = useState<"overview" | "services" | "payments" | "consultants">("overview")
+
   const [isDiscountModalOpen, setIsDiscountModalOpen] = useState(false)
+
   const [discountUpdated, setDiscountUpdated] = useState(false)
+
   const [isBulkServiceModalOpen, setIsBulkServiceModalOpen] = useState(false) // NEW: State for bulk service modal
 
   // State to hold service options for CreatableSelect
+
   const [serviceOptions, setServiceOptions] = useState<{ value: string; label: string; amount: number }[]>([])
 
   // ===== React Hook Form setups (Moved to top-level) =====
 
   // Additional Service Form (with CreatableSelect)
+
   const {
     register: registerService,
+
     handleSubmit: handleSubmitService,
+
     formState: { errors: errorsService },
+
     reset: resetService,
+
     setValue: setValueService,
+
     control: serviceControl,
   } = useForm<AdditionalServiceForm>({
     resolver: yupResolver(additionalServiceSchema),
+
     defaultValues: { serviceName: "", amount: 0, quantity: 1 }, // UPDATED: Added default quantity
   })
 
   // Payment Form
+
   const {
     register: registerPayment,
+
     handleSubmit: handleSubmitPayment,
+
     formState: { errors: errorsPayment },
+
     reset: resetPayment,
   } = useForm<PaymentForm>({
     resolver: yupResolver(paymentSchema),
+
     defaultValues: { paymentAmount: 0, paymentType: "cash", type: "advance", sendWhatsappNotification: false }, // UPDATED: Added default for new field
   })
 
   // Discount Form
+
   const {
     register: registerDiscount,
+
     handleSubmit: handleSubmitDiscount,
+
     formState: { errors: errorsDiscount },
+
     reset: resetDiscount,
+
     watch: watchDiscount,
   } = useForm<DiscountForm>({
     resolver: yupResolver(discountSchema),
+
     defaultValues: { discount: 0 },
   })
 
   // Watch discount value for animation
+
   const currentDiscount = watchDiscount("discount")
 
   // Consultant Charge Form
+
   const {
     register: registerVisit,
+
     handleSubmit: handleSubmitVisit,
+
     formState: { errors: errorsVisit },
+
     reset: resetVisit,
+
     watch: watchVisit,
+
     setValue: setVisitValue,
+
     control: visitControl, // ADDED: Destructure control for DoctorVisitForm
   } = useForm<DoctorVisitForm>({
     resolver: yupResolver(doctorVisitSchema),
+
     defaultValues: {
       doctorId: "",
+
       visitCharge: 0,
+
       visitTimes: 1,
+
       customDoctorName: "",
+
       isCustomDoctor: false,
     },
   })
 
   // ===== Fetch Beds Data =====
+
   useEffect(() => {
     const bedsRef = ref(db, "beds")
+
     const unsubscribe = onValue(bedsRef, (snapshot) => {
       if (snapshot.exists()) {
         setBeds(snapshot.val())
@@ -306,111 +413,171 @@ export default function BillingPage() {
         setBeds({})
       }
     })
+
     return () => unsubscribe()
   }, [])
 
   // ===== Fetch Doctors List =====
+
   useEffect(() => {
     const docsRef = ref(db, "doctors")
+
     const unsubscribe = onValue(docsRef, (snapshot) => {
       if (!snapshot.exists()) {
         setDoctors([])
+
         return
       }
+
       const data = snapshot.val()
+
       const list: IDoctor[] = Object.keys(data).map((key) => ({
         id: key,
+
         name: data[key].name,
+
         specialist: data[key].specialist,
+
         department: data[key].department,
+
         opdCharge: data[key].opdCharge,
+
         ipdCharges: data[key].ipdCharges,
       }))
+
       setDoctors(list)
     })
+
     return () => unsubscribe()
   }, [])
 
   // ===== Fetch Service Options for CreatableSelect =====
+
   useEffect(() => {
     const serviceRef = ref(db, "service")
+
     const unsubscribe = onValue(serviceRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.val()
+
         const options = Object.keys(data).map((key) => ({
           value: key,
+
           label: data[key].serviceName,
+
           amount: Number(data[key].amount) || 0,
         }))
+
         setServiceOptions(options)
       } else {
         setServiceOptions([])
       }
     })
+
     return () => unsubscribe()
   }, [])
 
   // Helper to format date for Firebase path key
+
   const getAdmitDateKey = (dateString: string | undefined) => {
     if (!dateString) return ""
+
     try {
       // Assuming dateString is an ISO string like "2025-06-21T06:04:51.312Z"
+
       return format(parseISO(dateString), "yyyy-MM-dd")
     } catch (e) {
       console.error("Error parsing date for admitDateKey:", e)
+
       return ""
     }
   }
 
   // ===== Load Selected Patient Record =====
+
   // We need both patient demographics (from "patients/patientinfo/[patientId]")
+
   // and IPD‐details (from "patients/ipddetail/userinfoipd/[patientId]/[ipdId]")
+
   useEffect(() => {
     if (!patientId || !ipdId || !admitDateKey) return
 
     setLoading(true)
+
     const ipdBillingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${admitDateKey}/${patientId}/${ipdId}`)
+
     const ipdInfoRef = ref(db, `patients/ipddetail/userinfoipd/${admitDateKey}/${patientId}/${ipdId}`)
+
     const patientInfoRef = ref(db, `patients/patientinfo/${patientId}`)
 
     // Add explicit types here
+
     let billingData: Record<string, any> | null = null
+
     let infoData: Record<string, any> | null = null
+
     let patientInfoData: Record<string, any> | null = null
+
     let billingLoaded = false
+
     let infoLoaded = false
+
     let patientInfoLoaded = false
 
     const checkAndSetRecord = () => {
       if (billingLoaded && infoLoaded && patientInfoLoaded) {
         let record: BillingRecord | null = null
+
         if (infoData) {
           record = {
             patientId,
+
             uhid: infoData.uhid ?? patientId,
+
             ipdId,
+
             name: infoData.name || (patientInfoData?.name ?? "Unknown"),
+
             mobileNumber: infoData.phone || (patientInfoData?.phone ?? ""),
+
             address: infoData.address || (patientInfoData?.address ?? ""),
+
             age: infoData.age || (patientInfoData?.age ?? ""),
+            ageUnit: infoData.ageUnit || (patientInfoData?.ageUnit ?? "years"), // ADDED: Capture ageUnit
+
             gender: infoData.gender || (patientInfoData?.gender ?? ""),
+
             relativeName: infoData.relativeName || "",
+
             relativePhone: infoData.relativePhone || "",
+
             relativeAddress: infoData.relativeAddress || "",
+
             dischargeDate: infoData.dischargeDate || "",
+
             amount: 0,
+
             paymentType: infoData.paymentType || "advance",
+
             roomType: infoData.roomType || "",
+
             bed: infoData.bed || "",
+
             services: [],
+
             payments: [],
+
             discount: 0,
+
             admitDate: infoData.admissionDate
               ? infoData.admissionDate
               : infoData.createdAt
                 ? infoData.createdAt
                 : undefined,
+
             createdAt: infoData.createdAt || "",
+
+            doctor: infoData.doctor || "", // NEW: Capture doctor ID from IPD info
           }
 
           if (billingData) {
@@ -418,29 +585,44 @@ export default function BillingPage() {
               billingData.services && Array.isArray(billingData.services)
                 ? billingData.services.map((svc: any) => ({
                     serviceName: svc.serviceName || "",
+
                     doctorName: svc.doctorName || "",
+
                     type: svc.type || "service",
+
                     amount: Number(svc.amount) || 0,
+
                     createdAt: svc.createdAt || "",
                   }))
                 : []
+
             let paymentsArray: Payment[] = []
+
             if (billingData.payments) {
               paymentsArray = Object.keys(billingData.payments).map((k) => ({
                 id: k,
+
                 amount: Number(billingData?.payments[k].amount) || 0,
+
                 paymentType: billingData?.payments[k].paymentType || "cash",
+
                 type: billingData?.payments[k].type || "advance",
+
                 date: billingData?.payments[k].date || new Date().toISOString(),
               }))
             }
 
             const depositTotal = Number(billingData.totalDeposit) || 0
+
             record = {
               ...record,
+
               amount: depositTotal,
+
               services: servicesArray,
+
               payments: paymentsArray,
+
               discount: billingData.discount ? Number(billingData.discount) : 0,
             }
           } else {
@@ -451,9 +633,11 @@ export default function BillingPage() {
         }
 
         setSelectedRecord(record)
+
         if (record?.discount) {
           resetDiscount({ discount: record.discount })
         }
+
         setLoading(false)
       }
     }
@@ -462,11 +646,14 @@ export default function BillingPage() {
       ipdBillingRef,
       (snap) => {
         billingData = snap.val() as Record<string, any> | null
+
         billingLoaded = true
+
         checkAndSetRecord()
       },
       (error) => {
         billingLoaded = true
+
         checkAndSetRecord()
       },
     )
@@ -475,43 +662,56 @@ export default function BillingPage() {
       ipdInfoRef,
       (snap) => {
         infoData = snap.val() as Record<string, any> | null
+
         infoLoaded = true
+
         checkAndSetRecord()
       },
       (error) => {
         infoLoaded = true
+
         checkAndSetRecord()
       },
     )
 
     // NEW: fetch patientinfo ONCE (no onValue, just get)
+
     get(patientInfoRef)
       .then((snap) => {
         patientInfoData = snap.exists() ? (snap.val() as Record<string, any>) : null
+
         patientInfoLoaded = true
+
         checkAndSetRecord()
       })
       .catch(() => {
         patientInfoLoaded = true
+
         checkAndSetRecord()
       })
 
     return () => {
       unsubscribeBilling()
+
       unsubscribeInfo()
     }
   }, [patientId, ipdId, admitDateKey, resetDiscount])
 
   // Auto-fill visit charge when a doctor is selected
+
   const watchSelectedDoctorId = watchVisit("doctorId")
+
   const watchIsCustomDoctor = watchVisit("isCustomDoctor")
+
   useEffect(() => {
     if (watchIsCustomDoctor || !watchSelectedDoctorId || !selectedRecord) return
 
     const doc = doctors.find((d) => d.id === watchSelectedDoctorId)
+
     if (!doc) return
 
     let amount = 0
+
     if (doc.department === "OPD") {
       amount = doc.opdCharge ?? 0
     } else if (doc.department === "IPD") {
@@ -522,6 +722,7 @@ export default function BillingPage() {
       if (selectedRecord.roomType && doc.ipdCharges && doc.ipdCharges[selectedRecord.roomType]) {
         amount = doc.ipdCharges[selectedRecord.roomType]
       }
+
       if (!amount && doc.opdCharge) {
         amount = doc.opdCharge
       }
@@ -531,29 +732,37 @@ export default function BillingPage() {
   }, [watchSelectedDoctorId, selectedRecord, doctors, setVisitValue, watchIsCustomDoctor])
 
   // Helper to group services by name and amount for display
+
   const getGroupedServices = (services: ServiceItem[]) => {
     const grouped: Record<string, { serviceName: string; amount: number; quantity: number; createdAt: string }> = {}
 
     services.forEach((item) => {
       if (item.type === "service") {
         // Only group hospital services
+
         const key = `${item.serviceName}-${item.amount}`
+
         if (grouped[key]) {
           grouped[key].quantity += 1
         } else {
           grouped[key] = {
             serviceName: item.serviceName,
+
             amount: item.amount,
+
             quantity: 1,
+
             createdAt: item.createdAt || new Date().toLocaleString(), // Use existing or current date
           }
         }
       }
     })
+
     return Object.values(grouped)
   }
 
   const serviceItems = selectedRecord?.services.filter((s) => s.type === "service") || []
+
   const groupedServiceItems = getGroupedServices(serviceItems)
 
   // ===== Calculations =====
@@ -590,31 +799,46 @@ export default function BillingPage() {
   const aggregatedConsultantCharges = consultantChargeItems.reduce(
     (acc, item) => {
       const key = item.doctorName || "Unknown"
+
       if (!acc[key]) {
         acc[key] = {
           doctorName: key,
+
           visited: 0,
+
           totalCharge: 0,
+
           lastVisit: null as Date | null,
+
           items: [] as ServiceItem[],
         }
       }
+
       acc[key].visited += 1
+
       acc[key].totalCharge += item.amount
+
       const itemDate = item.createdAt ? new Date(item.createdAt) : new Date(0)
+
       if (!acc[key].lastVisit || itemDate > acc[key].lastVisit) {
         acc[key].lastVisit = itemDate
       }
+
       acc[key].items.push(item)
+
       return acc
     },
     {} as Record<
       string,
       {
         doctorName: string
+
         visited: number
+
         totalCharge: number
+
         lastVisit: Date | null
+
         items: ServiceItem[]
       }
     >,
@@ -632,7 +856,9 @@ export default function BillingPage() {
     paymentType: "advance" | "refund",
   ) => {
     const apiUrl = "https://wa.medblisss.com/send-text"
+
     let message = ""
+
     if (paymentType === "advance") {
       message = `Dear ${patientName}, your payment of Rs ${paymentAmount.toLocaleString()} has been successfully added to your account. Your updated total deposit is Rs ${updatedDeposit.toLocaleString()}. Thank you for choosing our service.`
     } else {
@@ -641,16 +867,21 @@ export default function BillingPage() {
 
     const payload = {
       token: "99583991573",
+
       number: `91${patientMobile}`,
+
       message: message,
     }
 
     try {
       const response = await fetch(apiUrl, {
         method: "POST",
+
         headers: { "Content-Type": "application/json" },
+
         body: JSON.stringify(payload),
       })
+
       if (!response.ok) {
         console.error("Notification API error:", response.statusText)
       }
@@ -662,39 +893,56 @@ export default function BillingPage() {
   // ===== Handlers =====
 
   // 1. Add Additional Service (used by single service form)
+
   const onSubmitAdditionalService: SubmitHandler<AdditionalServiceForm> = async (data) => {
     if (!selectedRecord) return
 
     setLoading(true)
+
     const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+
     if (!currentAdmitDateKey) {
       toast.error("Admission date not found for record. Cannot add service.")
+
       setLoading(false)
+
       return
     }
 
     try {
       const oldServices = [...selectedRecord.services]
+
       const newItems: ServiceItem[] = [] // Changed to an array to hold multiple items
 
       // Loop based on quantity to create multiple service entries
+
       for (let i = 0; i < data.quantity; i++) {
         const newItem: ServiceItem = {
           serviceName: data.serviceName,
+
           doctorName: "", // Services don't have doctorName
+
           type: "service",
+
           amount: Number(data.amount),
+
           createdAt: new Date().toLocaleString(), // Unique timestamp for each item
         }
+
         newItems.push(newItem)
       }
 
       const updatedServices = [...newItems, ...oldServices] // Add all new items
+
       const sanitizedServices = updatedServices.map((svc) => ({
         serviceName: svc.serviceName || "",
+
         doctorName: svc.doctorName || "",
+
         type: svc.type || "service",
+
         amount: svc.amount || 0,
+
         createdAt: svc.createdAt || new Date().toLocaleString(),
       }))
 
@@ -702,14 +950,19 @@ export default function BillingPage() {
         db,
         `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`,
       )
+
       await update(recordRef, { services: sanitizedServices })
 
       toast.success(`Additional service${data.quantity > 1 ? "s" : ""} added successfully!`) // UPDATED: Toast message reflects quantity
+
       const updatedRecord = { ...selectedRecord, services: sanitizedServices }
+
       setSelectedRecord(updatedRecord)
+
       resetService({ serviceName: "", amount: 0, quantity: 1 }) // UPDATED: Reset quantity to 1
     } catch (error) {
       console.error("Error adding service:", error)
+
       toast.error("Failed to add service. Please try again.")
     } finally {
       setLoading(false)
@@ -717,36 +970,52 @@ export default function BillingPage() {
   }
 
   // NEW: Handler for bulk services from the modal
+
   const handleAddBulkServices = async (servicesToAdd: ParsedServiceItem[]) => {
     if (!selectedRecord) return
+
     setLoading(true)
+
     const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+
     if (!currentAdmitDateKey) {
       toast.error("Admission date not found for record. Cannot add bulk services.")
+
       setLoading(false)
+
       throw new Error("Admission date not found.") // Throw to be caught by modal
     }
 
     try {
       const currentServices = [...selectedRecord.services]
+
       for (const serviceData of servicesToAdd) {
         for (let i = 0; i < serviceData.quantity; i++) {
           const newItem: ServiceItem = {
             serviceName: serviceData.serviceName,
+
             doctorName: "",
+
             type: "service",
+
             amount: Number(serviceData.amount),
+
             createdAt: new Date().toLocaleString(),
           }
+
           currentServices.push(newItem)
         }
       }
 
       const sanitizedServices = currentServices.map((svc) => ({
         serviceName: svc.serviceName || "",
+
         doctorName: svc.doctorName || "",
+
         type: svc.type || "service",
+
         amount: svc.amount || 0,
+
         createdAt: svc.createdAt || new Date().toLocaleString(),
       }))
 
@@ -754,13 +1023,17 @@ export default function BillingPage() {
         db,
         `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`,
       )
+
       await update(recordRef, { services: sanitizedServices })
 
       const updatedRecord = { ...selectedRecord, services: sanitizedServices }
+
       setSelectedRecord(updatedRecord)
+
       // No toast here, modal will handle success toast
     } catch (error) {
       console.error("Error adding bulk services:", error)
+
       throw error // Re-throw to be caught by modal
     } finally {
       setLoading(false)
@@ -768,37 +1041,50 @@ export default function BillingPage() {
   }
 
   // 2. Add Payment with Notification
+
   const onSubmitPayment: SubmitHandler<PaymentForm> = async (formData) => {
     if (!selectedRecord) return
 
     setLoading(true)
+
     const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+
     if (!currentAdmitDateKey) {
       toast.error("Admission date not found for record. Cannot record payment.")
+
       setLoading(false)
+
       return
     }
 
     try {
       // Push new payment directly under the ipdId node
+
       const newPaymentRef = push(
         ref(
           db,
           `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments`, // Changed path
         ),
       )
+
       const newPayment: Payment = {
         amount: Number(formData.paymentAmount),
+
         paymentType: formData.paymentType,
+
         type: formData.type as "advance" | "refund",
+
         date: new Date().toISOString(),
+
         id: newPaymentRef.key!, // Asserting key is string, as Firebase push keys are never null
       }
 
       await update(newPaymentRef, newPayment)
 
       // Update deposit total directly under the ipdId node
+
       let updatedDeposit = Number(selectedRecord.amount)
+
       if (newPayment.type === "advance") {
         updatedDeposit += newPayment.amount
       } else if (newPayment.type === "refund") {
@@ -809,9 +1095,11 @@ export default function BillingPage() {
         db,
         `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
       )
+
       await update(recordRef, { totalDeposit: updatedDeposit })
 
       // Optional: send payment notification based on checkbox
+
       if (formData.sendWhatsappNotification) {
         await sendPaymentNotification(
           selectedRecord.mobileNumber,
@@ -825,13 +1113,19 @@ export default function BillingPage() {
       toast.success("Payment recorded successfully!")
 
       // To ensure the UI updates correctly, we need to fetch the new payment ID
+
       // from the push operation. Firebase's push returns a reference with a key.
+
       const updatedPayments = [newPayment, ...selectedRecord.payments] // newPayment already has the ID
+
       const updatedRecord = { ...selectedRecord, payments: updatedPayments, amount: updatedDeposit }
+
       setSelectedRecord(updatedRecord)
+
       resetPayment({ paymentAmount: 0, paymentType: "cash", type: "advance", sendWhatsappNotification: false }) // UPDATED: Reset checkbox
     } catch (error) {
       console.error("Error recording payment:", error)
+
       toast.error("Failed to record payment. Please try again.")
     } finally {
       setLoading(false)
@@ -839,41 +1133,56 @@ export default function BillingPage() {
   }
 
   // 3. Discharge Patient
+
   const handleDischarge = () => {
     if (!selectedRecord) return
+
     const admitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+
     router.push(`/discharge-summary/${selectedRecord.patientId}/${selectedRecord.ipdId}/${admitDateKey}`)
   }
 
   // 4. Apply Discount
+
   const onSubmitDiscount: SubmitHandler<DiscountForm> = async (formData) => {
     if (!selectedRecord) return
 
     setLoading(true)
+
     const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+
     if (!currentAdmitDateKey) {
       toast.error("Admission date not found for record. Cannot apply discount.")
+
       setLoading(false)
+
       return
     }
 
     try {
       const discountVal = Number(formData.discount)
+
       const recordRef = ref(
         db,
         `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
       )
+
       await update(recordRef, { discount: discountVal })
 
       toast.success("Discount applied successfully!")
+
       const updatedRecord = { ...selectedRecord, discount: discountVal }
+
       setSelectedRecord(updatedRecord)
+
       setDiscountUpdated(true)
+
       setTimeout(() => {
         setIsDiscountModalOpen(false)
       }, 1000)
     } catch (error) {
       console.error("Error applying discount:", error)
+
       toast.error("Failed to apply discount. Please try again.")
     } finally {
       setLoading(false)
@@ -881,52 +1190,74 @@ export default function BillingPage() {
   }
 
   // 5. Add Consultant Charge (Enhanced with multiple visits and custom doctor)
+
   const onSubmitDoctorVisit: SubmitHandler<DoctorVisitForm> = async (data) => {
     if (!selectedRecord) return
 
     setLoading(true)
+
     const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+
     if (!currentAdmitDateKey) {
       toast.error("Admission date not found for record. Cannot add consultant charge.")
+
       setLoading(false)
+
       return
     }
 
     try {
       let doctorName = ""
+
       if (data.isCustomDoctor) {
         doctorName = data.customDoctorName || "Custom Doctor"
       } else {
         const doc = doctors.find((d) => d.id === data.doctorId)
+
         if (!doc) {
           toast.error("Invalid doctor selection.")
+
           setLoading(false)
+
           return
         }
+
         doctorName = doc.name || "Unknown"
       }
 
       const oldServices = [...selectedRecord.services]
+
       const newItems: ServiceItem[] = []
 
       // Create multiple visit records based on visitTimes
+
       for (let i = 0; i < data.visitTimes; i++) {
         const newItem: ServiceItem = {
           serviceName: `Consultant Charge: Dr. ${doctorName}`,
+
           doctorName: doctorName,
+
           type: "doctorvisit",
+
           amount: Number(data.visitCharge) || 0,
+
           createdAt: new Date().toLocaleString(),
         }
+
         newItems.push(newItem)
       }
 
       const updatedServices = [...newItems, ...oldServices]
+
       const sanitizedServices = updatedServices.map((svc) => ({
         serviceName: svc.serviceName || "",
+
         doctorName: svc.doctorName || "",
+
         type: svc.type || "doctorvisit",
+
         amount: svc.amount || 0,
+
         createdAt: svc.createdAt || new Date().toLocaleString(),
       }))
 
@@ -934,22 +1265,31 @@ export default function BillingPage() {
         db,
         `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
       )
+
       await update(recordRef, { services: sanitizedServices })
 
       toast.success(
         `Consultant charge${data.visitTimes > 1 ? "s" : ""} added successfully! (${data.visitTimes} visit${data.visitTimes > 1 ? "s" : ""})`,
       )
+
       const updatedRecord = { ...selectedRecord, services: sanitizedServices }
+
       setSelectedRecord(updatedRecord)
+
       resetVisit({
         doctorId: "",
+
         visitCharge: 0,
+
         visitTimes: 1,
+
         customDoctorName: "",
+
         isCustomDoctor: false,
       })
     } catch (error) {
       console.error("Error adding consultant charge:", error)
+
       toast.error("Failed to add consultant charge. Please try again.")
     } finally {
       setLoading(false)
@@ -959,31 +1299,44 @@ export default function BillingPage() {
   // ===== Delete Handlers =====
 
   // Delete a grouped service item (for hospital services)
+
   const handleDeleteGroupedServiceItem = async (serviceName: string, amount: number) => {
     if (!selectedRecord) return
+
     setLoading(true)
+
     const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+
     if (!currentAdmitDateKey) {
       toast.error("Admission date not found for record. Cannot delete service.")
+
       setLoading(false)
+
       return
     }
 
     try {
       // Filter out all service items that match the grouped serviceName and amount
+
       const updatedServices = selectedRecord.services.filter(
         (svc) => !(svc.serviceName === serviceName && svc.amount === amount && svc.type === "service"),
       )
+
       const recordRef = ref(
         db,
         `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`,
       )
+
       await update(recordRef, { services: updatedServices })
+
       toast.success(`All instances of '${serviceName}' deleted successfully!`)
+
       const updatedRecord = { ...selectedRecord, services: updatedServices }
+
       setSelectedRecord(updatedRecord)
     } catch (error) {
       console.error("Error deleting grouped service:", error)
+
       toast.error("Failed to delete service. Please try again.")
     } finally {
       setLoading(false)
@@ -991,14 +1344,19 @@ export default function BillingPage() {
   }
 
   // Delete a payment
+
   const handleDeletePayment = async (paymentId: string, paymentAmount: number, paymentType: "advance" | "refund") => {
     if (!selectedRecord) return
 
     setLoading(true)
+
     const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+
     if (!currentAdmitDateKey) {
       toast.error("Admission date not found for record. Cannot delete payment.")
+
       setLoading(false)
+
       return
     }
 
@@ -1007,10 +1365,13 @@ export default function BillingPage() {
         db,
         `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments/${paymentId}`, // Changed path
       )
+
       await remove(paymentRef)
 
       // Adjust deposit after deleting payment
+
       let updatedDeposit = selectedRecord.amount
+
       if (paymentType === "advance") {
         updatedDeposit -= paymentAmount
       } else if (paymentType === "refund") {
@@ -1021,14 +1382,19 @@ export default function BillingPage() {
         db,
         `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
       )
+
       await update(recordRef, { totalDeposit: updatedDeposit })
 
       const updatedPayments = selectedRecord.payments.filter((p) => p.id !== paymentId)
+
       toast.success("Payment deleted successfully!")
+
       const updatedRecord = { ...selectedRecord, payments: updatedPayments, amount: updatedDeposit }
+
       setSelectedRecord(updatedRecord)
     } catch (error) {
       console.error("Error deleting payment:", error)
+
       toast.error("Failed to delete payment. Please try again.")
     } finally {
       setLoading(false)
@@ -1036,14 +1402,19 @@ export default function BillingPage() {
   }
 
   // Delete consultant charges for a specific doctor (aggregated deletion)
+
   const handleDeleteConsultantCharges = async (doctorName: string) => {
     if (!selectedRecord) return
 
     setLoading(true)
+
     const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+
     if (!currentAdmitDateKey) {
       toast.error("Admission date not found for record. Cannot delete consultant charges.")
+
       setLoading(false)
+
       return
     }
 
@@ -1051,17 +1422,22 @@ export default function BillingPage() {
       const updatedServices = selectedRecord.services.filter(
         (svc) => svc.type !== "doctorvisit" || svc.doctorName !== doctorName,
       )
+
       const recordRef = ref(
         db,
         `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
       )
+
       await update(recordRef, { services: updatedServices })
 
       toast.success(`Consultant charges for Dr. ${doctorName} deleted successfully!`)
+
       const updatedRecord = { ...selectedRecord, services: updatedServices }
+
       setSelectedRecord(updatedRecord)
     } catch (error) {
       console.error("Error deleting consultant charges:", error)
+
       toast.error("Failed to delete consultant charges. Please try again.")
     } finally {
       setLoading(false)
@@ -1069,15 +1445,19 @@ export default function BillingPage() {
   }
 
   // Prepare doctor options for react-select
+
   const doctorOptions = doctors.map((doc) => ({
     value: doc.id,
+
     label: `${doc.name} (${doc.specialist})`,
   }))
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 to-teal-50">
       <ToastContainer position="top-right" autoClose={3000} />
+
       {/* Header */}
+
       <header className="bg-white border-b border-teal-100 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
@@ -1087,6 +1467,7 @@ export default function BillingPage() {
             >
               <ArrowLeft size={18} className="mr-2" /> Back to Patients
             </button>
+
             <div className="flex items-center space-x-4">
               {selectedRecord && !selectedRecord.dischargeDate && (
                 <button
@@ -1097,6 +1478,7 @@ export default function BillingPage() {
                   <FileText size={16} className="mr-2" /> Discharge Summary
                 </button>
               )}
+
               <button
                 onClick={() => setIsPaymentHistoryOpen(true)}
                 className="flex items-center px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
@@ -1119,13 +1501,16 @@ export default function BillingPage() {
               transition={{ duration: 0.3 }}
             >
               {/* Patient Summary Card */}
+
               <div className="bg-white rounded-2xl shadow-md overflow-hidden mb-8">
                 <div className="bg-gradient-to-r from-teal-500 to-cyan-500 px-6 py-4">
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between">
                     <div>
                       <h1 className="text-2xl font-bold text-white">{selectedRecord.name}</h1>
+
                       <p className="text-teal-50">UHID: {selectedRecord.uhid ? selectedRecord.uhid : "Not assigned"}</p>
                     </div>
+
                     <div className="mt-2 md:mt-0 flex flex-col md:items-end">
                       <div className="inline-flex items-center px-3 py-1 rounded-full bg-white/20 text-white text-sm">
                         <Bed size={14} className="mr-2" />
@@ -1136,6 +1521,7 @@ export default function BillingPage() {
                           ? beds[selectedRecord.roomType][selectedRecord.bed].bedNumber
                           : "Unknown Bed"}
                       </div>
+
                       <div className="mt-2 text-teal-50 text-sm">
                         {selectedRecord.dischargeDate ? (
                           <span className="inline-flex items-center">
@@ -1154,62 +1540,82 @@ export default function BillingPage() {
                     </div>
                   </div>
                 </div>
+
                 <div className="p-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     {/* Financial Summary */}
+
                     <div className="bg-gradient-to-br from-teal-50 to-cyan-50 rounded-xl p-5 shadow-sm">
                       <h3 className="text-lg font-semibold text-teal-800 mb-3">Financial Summary</h3>
+
                       <div className="space-y-2">
                         <div className="flex justify-between">
                           <span className="text-gray-600">Hospital Services:</span>
+
                           <span className="font-medium">₹{hospitalServiceTotal.toLocaleString()}</span>
                         </div>
+
                         <div className="flex justify-between">
                           <span className="text-gray-600">Consultant Charges:</span>
+
                           <span className="font-medium">₹{consultantChargeTotal.toLocaleString()}</span>
                         </div>
+
                         {discountVal > 0 && (
                           <div className="flex justify-between text-green-600">
                             <span className="flex items-center">
                               <Tag size={14} className="mr-1" /> Discount ({discountPercentage}%):
                             </span>
+
                             <span className="font-medium">-₹{discountVal.toLocaleString()}</span>
                           </div>
                         )}
+
                         <div className="border-t border-teal-200 pt-2 mt-2">
                           <div className="flex justify-between font-bold text-teal-800">
                             <span>Total Bill:</span>
+
                             <span>₹{totalBill.toLocaleString()}</span>
                           </div>
                         </div>
+
                         <div className="flex justify-between mt-1">
                           <span className="text-gray-600">Deposit Amount:</span>
+
                           <span className="font-medium">₹{selectedRecord.amount.toLocaleString()}</span>
                         </div>
+
                         {totalRefunds > 0 && (
                           <div className="flex justify-between text-blue-600">
                             <span className="text-gray-600">Total Refunds:</span>
+
                             <span className="font-medium">₹{totalRefunds.toLocaleString()}</span>
                           </div>
                         )}
+
                         {balanceAmount > 0 ? (
                           <div className="flex justify-between text-red-600 font-bold">
                             <span>Due Amount:</span>
+
                             <span>₹{balanceAmount.toLocaleString()}</span>
                           </div>
                         ) : balanceAmount < 0 ? (
                           <div className="flex justify-between text-blue-600 font-bold">
                             <span>We have to refund :</span>
+
                             <span>₹{Math.abs(balanceAmount).toLocaleString()}</span>
                           </div>
                         ) : (
                           <div className="flex justify-between text-green-600 font-bold">
                             <span>Balance:</span>
+
                             <span>✓ Fully Paid</span>
                           </div>
                         )}
                       </div>
+
                       {/* Discount Quick Action Button */}
+
                       <button
                         onClick={() => setIsDiscountModalOpen(true)}
                         className="mt-4 w-full flex items-center justify-center px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg transition-colors shadow-sm"
@@ -1218,74 +1624,103 @@ export default function BillingPage() {
                         {discountVal > 0 ? "Update Discount" : "Add Discount"}
                       </button>
                     </div>
+
                     {/* Patient Details */}
+
                     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
                       <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center">
                         <User size={18} className="mr-2 text-teal-600" /> Patient Details
                       </h3>
+
                       <div className="space-y-2">
                         <div className="flex items-start">
                           <Phone size={16} className="mr-2 text-gray-400 mt-0.5" />
+
                           <div>
                             <p className="text-sm text-gray-500">Mobile</p>
+
                             <p className="font-medium">{selectedRecord.mobileNumber}</p>
                           </div>
                         </div>
+
                         <div className="flex items-start">
                           <MapPin size={16} className="mr-2 text-gray-400 mt-0.5" />
+
                           <div>
                             <p className="text-sm text-gray-500">Address</p>
+
                             <p className="font-medium">{selectedRecord.address || "Not provided"}</p>
                           </div>
                         </div>
+
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <p className="text-sm text-gray-500">Age</p>
-                            <p className="font-medium">{selectedRecord.age || "Not provided"}</p>
+
+                            <p className="font-medium">
+                              {selectedRecord.age || "Not provided"}{" "}
+                              {selectedRecord.ageUnit ? selectedRecord.ageUnit : "years"}
+                            </p>
                           </div>
+
                           <div>
                             <p className="text-sm text-gray-500">Gender</p>
+
                             <p className="font-medium">{selectedRecord.gender || "Not provided"}</p>
                           </div>
                         </div>
                       </div>
                     </div>
+
                     {/* Relative Details */}
+
                     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
                       <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center">
                         <Users size={18} className="mr-2 text-teal-600" /> Relative Details
                       </h3>
+
                       <div className="space-y-2">
                         <div>
                           <p className="text-sm text-gray-500">Name</p>
+
                           <p className="font-medium">{selectedRecord.relativeName || "Not provided"}</p>
                         </div>
+
                         <div>
                           <p className="text-sm text-gray-500">Phone</p>
+
                           <p className="font-medium">{selectedRecord.relativePhone || "Not provided"}</p>
                         </div>
+
                         <div>
                           <p className="text-sm text-gray-500">Address</p>
+
                           <p className="font-medium">{selectedRecord.relativeAddress || "Not provided"}</p>
                         </div>
                       </div>
                     </div>
+
                     {/* Quick Actions */}
+
                     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
                       <h3 className="text-lg font-semibold text-gray-800 mb-3">Quick Actions</h3>
+
                       <div className="space-y-3">
-                        <InvoiceDownload record={selectedRecord}>
+                        <InvoiceDownload record={selectedRecord} beds={beds} doctors={doctors}>
                           <button className="w-full flex items-center justify-center px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors">
                             <Download size={16} className="mr-2" /> Download Invoice
                           </button>
                         </InvoiceDownload>
+
                         <button
                           onClick={() => setActiveTab("payments")}
                           className="w-full flex items-center justify-center px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
                         >
                           <CreditCard size={16} className="mr-2" /> Add Payment
                         </button>
+
                         {/* NEW: Add Bulk Service Button */}
+
                         <button
                           onClick={() => setIsBulkServiceModalOpen(true)}
                           className="w-full flex items-center justify-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
@@ -1299,6 +1734,7 @@ export default function BillingPage() {
               </div>
 
               {/* Tabs Navigation */}
+
               <div className="mb-6">
                 <div className="border-b border-gray-200">
                   <nav className="flex -mb-px space-x-8">
@@ -1312,6 +1748,7 @@ export default function BillingPage() {
                     >
                       <FileText size={16} className="mr-2" /> Overview
                     </button>
+
                     <button
                       onClick={() => setActiveTab("services")}
                       className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
@@ -1322,6 +1759,7 @@ export default function BillingPage() {
                     >
                       <Plus size={16} className="mr-2" /> Services
                     </button>
+
                     <button
                       onClick={() => setActiveTab("payments")}
                       className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
@@ -1332,6 +1770,7 @@ export default function BillingPage() {
                     >
                       <CreditCard size={16} className="mr-2" /> Payments
                     </button>
+
                     <button
                       onClick={() => setActiveTab("consultants")}
                       className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
@@ -1347,16 +1786,20 @@ export default function BillingPage() {
               </div>
 
               {/* Tab Content */}
+
               <div className="bg-white rounded-2xl shadow-md overflow-hidden">
                 {/* Overview Tab */}
+
                 {activeTab === "overview" && (
                   <div className="p-6">
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                       {/* Hospital Services Summary */}
+
                       <div>
                         <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
                           <FileText size={20} className="mr-2 text-teal-600" /> Hospital Services
                         </h3>
+
                         {groupedServiceItems.length === 0 ? (
                           <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500">
                             No hospital services recorded yet.
@@ -1369,31 +1812,39 @@ export default function BillingPage() {
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Service
                                   </th>
+
                                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Qty
                                   </th>
+
                                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Amount
                                   </th>
+
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Date
                                   </th>
                                 </tr>
                               </thead>
+
                               <tbody className="divide-y divide-gray-200">
                                 {groupedServiceItems.slice(0, 5).map((srv, index) => (
                                   <tr key={index} className="hover:bg-gray-50">
                                     <td className="px-4 py-3 text-sm text-gray-900">{srv.serviceName}</td>
+
                                     <td className="px-4 py-3 text-sm text-gray-900 text-center">{srv.quantity}</td>
+
                                     <td className="px-4 py-3 text-sm text-gray-900 text-right">
                                       ₹{srv.amount.toLocaleString()}
                                     </td>
+
                                     <td className="px-4 py-3 text-sm text-gray-500">
                                       {srv.createdAt ? new Date(srv.createdAt).toLocaleDateString() : "N/A"}
                                     </td>
                                   </tr>
                                 ))}
                               </tbody>
+
                               <tfoot>
                                 <tr className="bg-gray-50">
                                   <td className="px-4 py-3 text-sm font-medium">Total</td>
@@ -1405,6 +1856,7 @@ export default function BillingPage() {
                                 </tr>
                               </tfoot>
                             </table>
+
                             {groupedServiceItems.length > 5 && (
                               <div className="mt-3 text-right">
                                 <button
@@ -1419,11 +1871,14 @@ export default function BillingPage() {
                           </div>
                         )}
                       </div>
+
                       {/* Consultant Charges Summary */}
+
                       <div>
                         <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
                           <UserPlus size={20} className="mr-2 text-teal-600" /> Consultant Charges
                         </h3>
+
                         {consultantChargeItems.length === 0 ? (
                           <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500">
                             No consultant charges recorded yet.
@@ -1436,35 +1891,44 @@ export default function BillingPage() {
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Doctor
                                   </th>
+
                                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Visits
                                   </th>
+
                                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Total
                                   </th>
                                 </tr>
                               </thead>
+
                               <tbody className="divide-y divide-gray-200">
                                 {aggregatedConsultantChargesArray.map((agg, idx) => (
                                   <tr key={idx} className="hover:bg-gray-50">
                                     <td className="px-4 py-3 text-sm text-gray-900">{agg.doctorName}</td>
+
                                     <td className="px-4 py-3 text-sm text-gray-900 text-center">{agg.visited}</td>
+
                                     <td className="px-4 py-3 text-sm text-gray-900 text-right">
                                       ₹{agg.totalCharge.toLocaleString()}
                                     </td>
                                   </tr>
                                 ))}
                               </tbody>
+
                               <tfoot>
                                 <tr className="bg-gray-50">
                                   <td className="px-4 py-3 text-sm font-medium">Total</td>
+
                                   <td></td>
+
                                   <td className="px-4 py-3 text-sm font-bold text-right">
                                     ₹{consultantChargeTotal.toLocaleString()}
                                   </td>
                                 </tr>
                               </tfoot>
                             </table>
+
                             <div className="mt-3 text-right">
                               <button
                                 onClick={() => setActiveTab("consultants")}
@@ -1481,12 +1945,15 @@ export default function BillingPage() {
                 )}
 
                 {/* Services Tab */}
+
                 {activeTab === "services" && (
                   <div className="p-6">
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                       {/* Services List */}
+
                       <div className="lg:col-span-2">
                         <h3 className="text-xl font-semibold text-gray-800 mb-4">Hospital Services</h3>
+
                         {groupedServiceItems.length === 0 ? (
                           <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500">
                             No hospital services recorded yet.
@@ -1499,31 +1966,40 @@ export default function BillingPage() {
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Service Name
                                   </th>
+
                                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Qty
                                   </th>
+
                                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Amount (₹)
                                   </th>
+
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Date/Time
                                   </th>
+
                                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Action
                                   </th>
                                 </tr>
                               </thead>
+
                               <tbody className="divide-y divide-gray-200">
                                 {groupedServiceItems.map((srv, index) => (
                                   <tr key={index} className="hover:bg-gray-50">
                                     <td className="px-4 py-3 text-sm text-gray-900">{srv.serviceName}</td>
+
                                     <td className="px-4 py-3 text-sm text-gray-900 text-center">{srv.quantity}</td>
+
                                     <td className="px-4 py-3 text-sm text-gray-900 text-right">
                                       {srv.amount.toLocaleString()}
                                     </td>
+
                                     <td className="px-4 py-3 text-sm text-gray-500">
                                       {srv.createdAt ? new Date(srv.createdAt).toLocaleString() : "N/A"}
                                     </td>
+
                                     <td className="px-4 py-3 text-sm text-center">
                                       <button
                                         onClick={() => handleDeleteGroupedServiceItem(srv.serviceName, srv.amount)}
@@ -1536,6 +2012,7 @@ export default function BillingPage() {
                                   </tr>
                                 ))}
                               </tbody>
+
                               <tfoot>
                                 <tr className="bg-gray-50">
                                   <td className="px-4 py-3 text-sm font-medium">Total</td>
@@ -1550,20 +2027,27 @@ export default function BillingPage() {
                           </div>
                         )}
                       </div>
+
                       {/* Add Service Form (with manual typing or selection) */}
+
                       <div className="lg:col-span-1">
                         <div className="bg-white rounded-lg border border-gray-200 p-6">
                           <h3 className="text-lg font-semibold text-gray-800 mb-4">Add Hospital Service</h3>
+
                           <form onSubmit={handleSubmitService(onSubmitAdditionalService)} className="space-y-4">
                             {/* Service Name Field with CreatableSelect */}
+
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-1">Service Name</label>
+
                               <Controller
                                 control={serviceControl}
                                 name="serviceName"
                                 render={({ field }) => {
                                   // If the typed-in service is not in the array, create an object so CreatableSelect won't complain
+
                                   const valueStr = field.value || ""
+
                                   const selectedOption = serviceOptions.find(
                                     (option) =>
                                       typeof option.label === "string" &&
@@ -1571,6 +2055,7 @@ export default function BillingPage() {
                                       option.label.toLowerCase() === valueStr.toLowerCase(),
                                   ) || {
                                     label: valueStr,
+
                                     value: valueStr,
                                   }
 
@@ -1583,14 +2068,19 @@ export default function BillingPage() {
                                       onChange={(selected) => {
                                         if (selected) {
                                           // If user chose an existing service, auto-fill the amount
+
                                           field.onChange(selected.label)
+
                                           // If that option has a known amount, set it
+
                                           const foundOption = serviceOptions.find((opt) => opt.label === selected.label)
+
                                           if (foundOption) {
                                             setValueService("amount", foundOption.amount)
                                           }
                                         } else {
                                           field.onChange("")
+
                                           setValueService("amount", 0)
                                         }
                                       }}
@@ -1599,13 +2089,17 @@ export default function BillingPage() {
                                   )
                                 }}
                               />
+
                               {errorsService.serviceName && (
                                 <p className="text-red-500 text-xs mt-1">{errorsService.serviceName.message}</p>
                               )}
                             </div>
+
                             {/* Amount Field */}
+
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₹)</label>
+
                               <input
                                 type="number"
                                 {...registerService("amount")}
@@ -1614,13 +2108,17 @@ export default function BillingPage() {
                                   errorsService.amount ? "border-red-500" : "border-gray-300"
                                 } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
                               />
+
                               {errorsService.amount && (
                                 <p className="text-red-500 text-xs mt-1">{errorsService.amount.message}</p>
                               )}
                             </div>
+
                             {/* NEW: Quantity Field */}
+
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+
                               <input
                                 type="number"
                                 {...registerService("quantity")}
@@ -1630,10 +2128,12 @@ export default function BillingPage() {
                                   errorsService.quantity ? "border-red-500" : "border-gray-300"
                                 } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
                               />
+
                               {errorsService.quantity && (
                                 <p className="text-red-500 text-xs mt-1">{errorsService.quantity.message}</p>
                               )}
                             </div>
+
                             <button
                               type="submit"
                               disabled={loading}
@@ -1651,26 +2151,32 @@ export default function BillingPage() {
                             </button>
                           </form>
                         </div>
+
                         {/* Enhanced Discount Card */}
+
                         <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg border border-emerald-200 p-6 mt-6 shadow-sm">
                           <h3 className="text-lg font-semibold text-emerald-800 mb-4 flex items-center">
                             <Percent size={18} className="mr-2 text-emerald-600" /> Discount
                           </h3>
+
                           {discountVal > 0 ? (
                             <div className="space-y-4">
                               <div className="bg-white rounded-lg p-4 shadow-sm border border-emerald-100">
                                 <div className="flex justify-between items-center">
                                   <div>
                                     <p className="text-sm text-gray-500">Current Discount</p>
+
                                     <p className="text-2xl font-bold text-emerald-600">
                                       ₹{discountVal.toLocaleString()}
                                     </p>
                                   </div>
+
                                   <div className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-sm font-medium">
                                     {discountPercentage}% off
                                   </div>
                                 </div>
                               </div>
+
                               <button
                                 onClick={() => setIsDiscountModalOpen(true)}
                                 className="w-full py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center"
@@ -1682,8 +2188,10 @@ export default function BillingPage() {
                             <div className="space-y-4">
                               <div className="bg-white rounded-lg p-4 shadow-sm border border-dashed border-emerald-200 text-center">
                                 <p className="text-gray-500 mb-2">No discount applied yet</p>
+
                                 <DollarSign size={24} className="mx-auto text-emerald-300" />
                               </div>
+
                               <button
                                 onClick={() => setIsDiscountModalOpen(true)}
                                 className="w-full py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center"
@@ -1699,32 +2207,41 @@ export default function BillingPage() {
                 )}
 
                 {/* Payments Tab */}
+
                 {activeTab === "payments" && (
                   <div className="p-6">
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                       {/* Payment Summary */}
+
                       <div className="lg:col-span-2">
                         <h3 className="text-xl font-semibold text-gray-800 mb-4">Payment Summary</h3>
+
                         <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div className="bg-teal-50 rounded-lg p-4">
                               <p className="text-sm text-teal-600">Total Bill</p>
+
                               <p className="text-2xl font-bold text-teal-800">₹{totalBill.toLocaleString()}</p>
                             </div>
+
                             <div className="bg-cyan-50 rounded-lg p-4">
                               <p className="text-sm text-cyan-600">Deposit Amount</p>
+
                               <p className="text-2xl font-bold text-cyan-800">
                                 ₹{selectedRecord.amount.toLocaleString()}
                               </p>
                             </div>
+
                             {balanceAmount > 0 ? (
                               <div className="bg-red-50 rounded-lg p-4">
                                 <p className="text-sm text-red-600">Due Amount</p>
+
                                 <p className="text-2xl font-bold text-red-800">₹{balanceAmount.toLocaleString()}</p>
                               </div>
                             ) : balanceAmount < 0 ? (
                               <div className="bg-blue-50 rounded-lg p-4">
                                 <p className="text-sm text-blue-600">Total Amount we have to Refund</p>
+
                                 <p className="text-2xl font-bold text-blue-800">
                                   ₹{Math.abs(balanceAmount).toLocaleString()}
                                 </p>
@@ -1732,12 +2249,15 @@ export default function BillingPage() {
                             ) : (
                               <div className="bg-green-50 rounded-lg p-4">
                                 <p className="text-sm text-green-600">Fully Paid</p>
+
                                 <p className="text-2xl font-bold text-green-800">✓</p>
                               </div>
                             )}
                           </div>
                         </div>
+
                         <h3 className="text-xl font-semibold text-gray-800 mb-4">Payment History</h3>
+
                         {selectedRecord.payments.length === 0 ? (
                           <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500">
                             No payments recorded yet.
@@ -1750,39 +2270,50 @@ export default function BillingPage() {
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     #
                                   </th>
+
                                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Amount (₹)
                                   </th>
+
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Payment Type
                                   </th>
+
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Type
                                   </th>
+
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Date
                                   </th>
+
                                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Action
                                   </th>
                                 </tr>
                               </thead>
+
                               <tbody className="divide-y divide-gray-200">
                                 {selectedRecord.payments.map((payment, index) => (
                                   <tr key={index} className="hover:bg-gray-50">
                                     <td className="px-4 py-3 text-sm text-gray-900">{index + 1}</td>
+
                                     <td className="px-4 py-3 text-sm text-gray-900 text-right">
                                       {payment.amount.toLocaleString()}
                                     </td>
+
                                     <td className="px-4 py-3 text-sm text-gray-900 capitalize">
                                       {payment.paymentType}
                                     </td>
+
                                     <td className="px-4 py-3 text-sm text-gray-900 capitalize">
                                       {payment.type || "advance"}
                                     </td>
+
                                     <td className="px-4 py-3 text-sm text-gray-500">
                                       {new Date(payment.date).toLocaleString()}
                                     </td>
+
                                     <td className="px-4 py-3 text-sm text-center">
                                       <button
                                         onClick={() =>
@@ -1801,15 +2332,19 @@ export default function BillingPage() {
                           </div>
                         )}
                       </div>
+
                       {/* Add Payment Form */}
+
                       <div className="lg:col-span-1">
                         <div className="bg-white rounded-lg border border-gray-200 p-6">
                           <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
                             <CreditCard size={16} className="mr-2 text-teal-600" /> Record Payment
                           </h3>
+
                           <form onSubmit={handleSubmitPayment(onSubmitPayment)} className="space-y-4">
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-1">Payment Amount (₹)</label>
+
                               <input
                                 type="number"
                                 {...registerPayment("paymentAmount")}
@@ -1818,12 +2353,15 @@ export default function BillingPage() {
                                   errorsPayment.paymentAmount ? "border-red-500" : "border-gray-300"
                                 } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
                               />
+
                               {errorsPayment.paymentAmount && (
                                 <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentAmount.message}</p>
                               )}
                             </div>
+
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-1">Payment Type</label>
+
                               <select
                                 {...registerPayment("paymentType")}
                                 defaultValue="cash"
@@ -1832,16 +2370,22 @@ export default function BillingPage() {
                                 } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
                               >
                                 <option value="">Select Payment Type</option>
+
                                 <option value="cash">Cash</option>
+
                                 <option value="online">Online</option>
+
                                 <option value="card">Card</option>
                               </select>
+
                               {errorsPayment.paymentType && (
                                 <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentType.message}</p>
                               )}
                             </div>
+
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+
                               <select
                                 {...registerPayment("type")}
                                 className={`w-full px-3 py-2 rounded-lg border ${
@@ -1849,13 +2393,17 @@ export default function BillingPage() {
                                 } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
                               >
                                 <option value="advance">Advance</option>
+
                                 <option value="refund">Refund</option>
                               </select>
+
                               {errorsPayment.type && (
                                 <p className="text-red-500 text-xs mt-1">{errorsPayment.type.message}</p>
                               )}
                             </div>
+
                             {/* NEW: WhatsApp Notification Checkbox */}
+
                             <div>
                               <div className="flex items-center mt-4">
                                 <input
@@ -1864,16 +2412,19 @@ export default function BillingPage() {
                                   {...registerPayment("sendWhatsappNotification")}
                                   className="h-4 w-4 text-teal-600 focus:ring-teal-500 border-gray-300 rounded"
                                 />
+
                                 <label htmlFor="sendWhatsappNotification" className="ml-2 block text-sm text-gray-900">
                                   Send message on WhatsApp
                                 </label>
                               </div>
+
                               {errorsPayment.sendWhatsappNotification && (
                                 <p className="text-red-500 text-xs mt-1">
                                   {errorsPayment.sendWhatsappNotification.message}
                                 </p>
                               )}
                             </div>
+
                             <button
                               type="submit"
                               disabled={loading}
@@ -1897,12 +2448,15 @@ export default function BillingPage() {
                 )}
 
                 {/* Consultants Tab - Enhanced */}
+
                 {activeTab === "consultants" && (
                   <div className="p-6">
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                       {/* Consultant Charges List */}
+
                       <div className="lg:col-span-2">
                         <h3 className="text-xl font-semibold text-gray-800 mb-4">Consultant Charges</h3>
+
                         {consultantChargeItems.length === 0 ? (
                           <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500">
                             No consultant charges recorded yet.
@@ -1915,31 +2469,40 @@ export default function BillingPage() {
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Doctor
                                   </th>
+
                                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Visits
                                   </th>
+
                                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Total Charge (₹)
                                   </th>
+
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Last Visit
                                   </th>
+
                                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Action
                                   </th>
                                 </tr>
                               </thead>
+
                               <tbody className="divide-y divide-gray-200">
                                 {aggregatedConsultantChargesArray.map((agg, idx) => (
                                   <tr key={idx} className="hover:bg-gray-50">
                                     <td className="px-4 py-3 text-sm text-gray-900">{agg.doctorName}</td>
+
                                     <td className="px-4 py-3 text-sm text-gray-900 text-center">{agg.visited}</td>
+
                                     <td className="px-4 py-3 text-sm text-gray-900 text-right">
                                       ₹{agg.totalCharge.toLocaleString()}
                                     </td>
+
                                     <td className="px-4 py-3 text-sm text-gray-500">
                                       {agg.lastVisit ? agg.lastVisit.toLocaleString() : "N/A"}
                                     </td>
+
                                     <td className="px-4 py-3 text-sm text-center">
                                       <button
                                         onClick={() => handleDeleteConsultantCharges(agg.doctorName)}
@@ -1952,13 +2515,17 @@ export default function BillingPage() {
                                   </tr>
                                 ))}
                               </tbody>
+
                               <tfoot>
                                 <tr className="bg-gray-50">
                                   <td className="px-4 py-3 text-sm font-medium">Total</td>
+
                                   <td></td>
+
                                   <td className="px-4 py-3 text-sm font-bold text-right">
                                     ₹{consultantChargeTotal.toLocaleString()}
                                   </td>
+
                                   <td colSpan={2}></td>
                                 </tr>
                               </tfoot>
@@ -1966,14 +2533,18 @@ export default function BillingPage() {
                           </div>
                         )}
                       </div>
+
                       {/* Enhanced Add Consultant Charge Form */}
+
                       <div className="lg:col-span-1">
                         <div className="bg-white rounded-lg border border-gray-200 p-6">
                           <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
                             <UserPlus size={16} className="mr-2 text-teal-600" /> Add Consultant Charge
                           </h3>
+
                           <form onSubmit={handleSubmitVisit(onSubmitDoctorVisit)} className="space-y-4">
                             {/* Custom Doctor Toggle */}
+
                             <div className="flex items-center space-x-2 mb-4">
                               <input
                                 type="checkbox"
@@ -1981,17 +2552,21 @@ export default function BillingPage() {
                                 id="customDoctorToggle"
                                 className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
                               />
+
                               <label htmlFor="customDoctorToggle" className="text-sm font-medium text-gray-700">
                                 Add custom doctor
                               </label>
                             </div>
+
                             {/* Doctor Selection or Custom Entry */}
+
                             {!watchIsCustomDoctor ? (
                               <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                   <Search size={16} className="inline mr-1" />
                                   Select Doctor
                                 </label>
+
                                 <Controller
                                   control={visitControl} // UPDATED: Use visitControl
                                   name="doctorId"
@@ -2009,8 +2584,11 @@ export default function BillingPage() {
                                       styles={{
                                         control: (base, state) => ({
                                           ...base,
+
                                           borderColor: errorsVisit.doctorId ? "rgb(239 68 68)" : base.borderColor,
+
                                           boxShadow: state.isFocused ? "0 0 0 2px rgb(20 184 166)" : base.boxShadow,
+
                                           "&:hover": {
                                             borderColor: errorsVisit.doctorId
                                               ? "rgb(239 68 68)"
@@ -2021,6 +2599,7 @@ export default function BillingPage() {
                                     />
                                   )}
                                 />
+
                                 {errorsVisit.doctorId && (
                                   <p className="text-red-500 text-xs mt-1">{errorsVisit.doctorId.message}</p>
                                 )}
@@ -2030,6 +2609,7 @@ export default function BillingPage() {
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                   Custom Doctor Name
                                 </label>
+
                                 <input
                                   type="text"
                                   {...registerVisit("customDoctorName")}
@@ -2038,14 +2618,18 @@ export default function BillingPage() {
                                     errorsVisit.customDoctorName ? "border-red-500" : "border-gray-300"
                                   } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
                                 />
+
                                 {errorsVisit.customDoctorName && (
                                   <p className="text-red-500 text-xs mt-1">{errorsVisit.customDoctorName.message}</p>
                                 )}
                               </div>
                             )}
+
                             {/* Visit Charge */}
+
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-1">Visit Charge (₹)</label>
+
                               <input
                                 type="number"
                                 {...registerVisit("visitCharge")}
@@ -2054,16 +2638,20 @@ export default function BillingPage() {
                                   errorsVisit.visitCharge ? "border-red-500" : "border-gray-300"
                                 } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
                               />
+
                               {errorsVisit.visitCharge && (
                                 <p className="text-red-500 text-xs mt-1">{errorsVisit.visitCharge.message}</p>
                               )}
                             </div>
+
                             {/* Visit Times */}
+
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-1">
                                 <Clock size={16} className="inline mr-1" />
                                 Number of Visits
                               </label>
+
                               <input
                                 type="number"
                                 {...registerVisit("visitTimes")}
@@ -2074,13 +2662,16 @@ export default function BillingPage() {
                                   errorsVisit.visitTimes ? "border-red-500" : "border-gray-300"
                                 } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
                               />
+
                               {errorsVisit.visitTimes && (
                                 <p className="text-red-500 text-xs mt-1">{errorsVisit.visitTimes.message}</p>
                               )}
+
                               <p className="text-xs text-gray-500 mt-1">
                                 Each visit will be recorded separately with current timestamp
                               </p>
                             </div>
+
                             <button
                               type="submit"
                               disabled={loading}
@@ -2108,12 +2699,14 @@ export default function BillingPage() {
         ) : (
           <div className="flex items-center justify-center h-64">
             <div className="w-16 h-16 border-4 border-t-teal-500 border-gray-200 rounded-full animate-spin mx-auto mb-4"></div>
+
             <p className="text-gray-500">Loading patient record...</p>
           </div>
         )}
       </main>
 
       {/* Payment History Modal */}
+
       <Transition appear show={isPaymentHistoryOpen} as={React.Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setIsPaymentHistoryOpen(false)}>
           <Transition.Child
@@ -2127,6 +2720,7 @@ export default function BillingPage() {
           >
             <div className="fixed inset-0 bg-black bg-opacity-40" />
           </Transition.Child>
+
           <div className="fixed inset-0 overflow-y-auto flex items-center justify-center p-4">
             <Transition.Child
               as={React.Fragment}
@@ -2140,6 +2734,7 @@ export default function BillingPage() {
               <Dialog.Panel className="bg-white rounded-xl shadow-xl p-6 max-w-lg w-full">
                 <div className="flex items-center justify-between mb-4">
                   <Dialog.Title className="text-xl font-bold text-gray-800">Payment History</Dialog.Title>
+
                   <button
                     onClick={() => setIsPaymentHistoryOpen(false)}
                     className="text-gray-400 hover:text-gray-600 transition-colors"
@@ -2147,6 +2742,7 @@ export default function BillingPage() {
                     <X size={20} />
                   </button>
                 </div>
+
                 {selectedRecord && selectedRecord.payments.length > 0 ? (
                   <div className="overflow-x-auto max-h-96">
                     <table className="w-full">
@@ -2155,35 +2751,46 @@ export default function BillingPage() {
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             #
                           </th>
+
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Amount (₹)
                           </th>
+
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Payment Type
                           </th>
+
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Type
                           </th>
+
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Date
                           </th>
+
                           <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Action
                           </th>
                         </tr>
                       </thead>
+
                       <tbody className="divide-y divide-gray-200">
                         {selectedRecord.payments.map((payment, index) => (
                           <tr key={index} className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm text-gray-900">{index + 1}</td>
+
                             <td className="px-4 py-3 text-sm text-gray-900 text-right">
                               {payment.amount.toLocaleString()}
                             </td>
+
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.paymentType}</td>
+
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.type || "advance"}</td>
+
                             <td className="px-4 py-3 text-sm text-gray-500">
                               {new Date(payment.date).toLocaleString()}
                             </td>
+
                             <td className="px-4 py-3 text-sm text-center">
                               <button
                                 onClick={() =>
@@ -2203,6 +2810,7 @@ export default function BillingPage() {
                 ) : (
                   <p className="text-gray-500 text-center py-8">No payments recorded yet.</p>
                 )}
+
                 <div className="mt-6 flex justify-end">
                   <button
                     onClick={() => setIsPaymentHistoryOpen(false)}
@@ -2218,6 +2826,7 @@ export default function BillingPage() {
       </Transition>
 
       {/* Discount Modal */}
+
       <Transition appear show={isDiscountModalOpen} as={React.Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setIsDiscountModalOpen(false)}>
           <Transition.Child
@@ -2231,6 +2840,7 @@ export default function BillingPage() {
           >
             <div className="fixed inset-0 bg-black bg-opacity-40" />
           </Transition.Child>
+
           <div className="fixed inset-0 overflow-y-auto flex items-center justify-center p-4">
             <Transition.Child
               as={React.Fragment}
@@ -2247,6 +2857,7 @@ export default function BillingPage() {
                     <Percent size={20} className="mr-2 text-emerald-600" />
                     {discountVal > 0 ? "Update Discount" : "Add Discount"}
                   </Dialog.Title>
+
                   <button
                     onClick={() => setIsDiscountModalOpen(false)}
                     className="text-gray-400 hover:text-gray-600 transition-colors"
@@ -2254,15 +2865,18 @@ export default function BillingPage() {
                     <X size={20} />
                   </button>
                 </div>
+
                 <div className="mb-6">
                   <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg p-4 mb-4">
                     <div className="flex justify-between items-center">
                       <div>
                         <p className="text-sm text-gray-600">Total Bill Amount</p>
+
                         <p className="text-xl font-bold text-gray-800">
                           ₹{(hospitalServiceTotal + consultantChargeTotal).toLocaleString()}
                         </p>
                       </div>
+
                       {discountVal > 0 && (
                         <div className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-sm font-medium">
                           Current: ₹{discountVal.toLocaleString()}
@@ -2270,11 +2884,14 @@ export default function BillingPage() {
                       )}
                     </div>
                   </div>
+
                   <form onSubmit={handleSubmitDiscount(onSubmitDiscount)} className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Discount Amount (₹)</label>
+
                       <div className="relative">
                         <DollarSign className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+
                         <input
                           type="number"
                           {...registerDiscount("discount")}
@@ -2284,11 +2901,14 @@ export default function BillingPage() {
                           } transition duration-200`}
                         />
                       </div>
+
                       {errorsDiscount.discount && (
                         <p className="text-red-500 text-xs mt-1">{errorsDiscount.discount.message}</p>
                       )}
                     </div>
+
                     {/* Discount percentage display */}
+
                     {currentDiscount > 0 && hospitalServiceTotal + consultantChargeTotal > 0 && (
                       <motion.div
                         initial={{ opacity: 0, y: 10 }}
@@ -2305,6 +2925,7 @@ export default function BillingPage() {
                         </p>
                       </motion.div>
                     )}
+
                     <div className="flex space-x-3 pt-2">
                       <button
                         type="button"
@@ -2313,6 +2934,7 @@ export default function BillingPage() {
                       >
                         Cancel
                       </button>
+
                       <button
                         type="submit"
                         disabled={loading}
@@ -2339,6 +2961,7 @@ export default function BillingPage() {
       </Transition>
 
       {/* NEW: Bulk Service Modal */}
+
       <BulkServiceModal
         isOpen={isBulkServiceModalOpen}
         onClose={() => setIsBulkServiceModalOpen(false)}
