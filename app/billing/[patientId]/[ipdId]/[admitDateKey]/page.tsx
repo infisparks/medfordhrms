@@ -1448,9 +1448,15 @@ export default function BillingPage() {
 
   const doctorOptions = doctors.map((doc) => ({
     value: doc.id,
-
     label: `${doc.name} (${doc.specialist})`,
   }))
+
+  // Get primary doctor name from selectedRecord.doctor and doctors array
+  let primaryDoctorName = "N/A";
+  if (selectedRecord?.doctor) {
+    const foundDoc = doctors.find((doc) => doc.id === selectedRecord.doctor);
+    if (foundDoc) primaryDoctorName = foundDoc.name;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 to-teal-50">
@@ -1507,8 +1513,9 @@ export default function BillingPage() {
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between">
                     <div>
                       <h1 className="text-2xl font-bold text-white">{selectedRecord.name}</h1>
-
                       <p className="text-teal-50">UHID: {selectedRecord.uhid ? selectedRecord.uhid : "Not assigned"}</p>
+                      {/* Display Doctor Name */}
+                      <p className="text-teal-50 mt-1">Under care of Dr.: <span className="font-semibold">{primaryDoctorName}</span></p>
                     </div>
 
                     <div className="mt-2 md:mt-0 flex flex-col md:items-end">
