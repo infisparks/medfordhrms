@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import { db } from "@/lib/firebase"
 import { format } from "date-fns"
-import { ref, query, get, onChildAdded, onChildChanged, onChildRemoved, off } from "firebase/database"
+import { ref, get, remove, onChildAdded, onChildChanged, onChildRemoved, off } from "firebase/database"
 import { useRouter } from "next/navigation"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { EditButton } from "./edit-button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Calendar, RefreshCw, Eye, ArrowUpDown, X, Filter, Trash2, AlertCircle, Users, Search } from "lucide-react"
+import { Calendar, RefreshCw, Eye, ArrowUpDown, X, Filter, Trash2, AlertCircle, Users } from "lucide-react"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
 
@@ -36,9 +36,9 @@ interface Appointment {
   phone: string
   date: string
   time: string
-  doctor?: string // This is the main consulting doctor, not necessarily from modalities
+  doctor?: string
   appointmentType: string
-  modalities: any[] // Modalities can contain doctor info for consultation type
+  modalities: any[]
   createdAt: string
   payment?: {
     totalCharges: number
@@ -48,9 +48,7 @@ interface Appointment {
   }
 }
 
-// Only these modalities count for tabs/filters
 const DOCTOR_MODALITY_TYPES = ["consultation", "radiology", "cardiology"]
-
 const getTodayDateKey = () => format(new Date(), "yyyy-MM-dd")
 
 function flattenAppointment(patientId: string, apptId: string, data: any): Appointment {
@@ -75,12 +73,11 @@ function flattenAppointment(patientId: string, apptId: string, data: any): Appoi
 }
 
 function collectDoctorTabs(appointments: Appointment[]) {
-  // Count patients for each doctor for these modalities (consultation, radiology, cardiology)
   const docTabMap = new Map<string, { name: string; count: number }>()
   appointments.forEach(app => {
     if (app.appointmentType === "visithospital" && Array.isArray(app.modalities)) {
       const uniqueDoctors = new Set<string>()
-      app.modalities.forEach(modality => {
+      app.modalities.forEach((modality: any) => {
         if (DOCTOR_MODALITY_TYPES.includes(modality.type) && modality.doctor) {
           uniqueDoctors.add(modality.doctor)
         }
@@ -112,6 +109,13 @@ export default function ManageOPDPage() {
   const [phoneSearch, setPhoneSearch] = useState("")
   const [phoneSearchLoading, setPhoneSearchLoading] = useState(false)
   const phoneListenerRefs = useRef<any[]>([])
+
+  // Delete Modal
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deletePassword, setDeletePassword] = useState("")
+  const [deleteError, setDeleteError] = useState("")
+  const [appointmentToDelete, setAppointmentToDelete] = useState<Appointment | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   // Clear listeners on unmount
   useEffect(() => {
@@ -149,7 +153,6 @@ export default function ManageOPDPage() {
 
   // ============ UHID Search - Real-Time, Only That User =============
   useEffect(() => {
-    // Clear previous listeners
     if (uhidListenerRef.current && uhidListenerPath.current)
       off(ref(db, uhidListenerPath.current), "child_added", uhidListenerRef.current)
     uhidListenerRef.current = null
@@ -160,7 +163,6 @@ export default function ManageOPDPage() {
     const todayKey = getTodayDateKey()
     const opdPath = `patients/opddetail/${todayKey}`
 
-    // Search by prefix, download only matching UHIDs
     get(ref(db, opdPath)).then((snap) => {
       const data = snap.val()
       const result: Appointment[] = []
@@ -181,13 +183,11 @@ export default function ManageOPDPage() {
       setDownloadedBytes(totalBytes)
       setUhidSearchLoading(false)
 
-      // Now attach a real-time listener for new/changed/removed for each matching uhid
       Object.keys(data || {}).forEach((uhid) => {
         if (uhid.toLowerCase().startsWith(uhidSearch.toLowerCase())) {
           const path = `patients/opddetail/${todayKey}/${uhid}`
-          // onChildAdded
           const fn = (snap: any) => {
-            setAppointments((prev) => {
+            setAppointments((prev: Appointment[]) => {
               const found = prev.find(a => a.id === snap.key && a.patientId === uhid)
               if (found) return prev
               const val = snap.val()
@@ -196,18 +196,16 @@ export default function ManageOPDPage() {
             })
           }
           onChildAdded(ref(db, path), fn)
-          // onChildChanged
           onChildChanged(ref(db, path), (snap: any) => {
-            setAppointments((prev) =>
+            setAppointments((prev: Appointment[]) =>
               prev.map(a => (a.id === snap.key && a.patientId === uhid)
                 ? flattenAppointment(uhid, snap.key, snap.val())
                 : a
               )
             )
           })
-          // onChildRemoved
           onChildRemoved(ref(db, path), (snap: any) => {
-            setAppointments((prev) => prev.filter(a => !(a.id === snap.key && a.patientId === uhid)))
+            setAppointments((prev: Appointment[]) => prev.filter(a => !(a.id === snap.key && a.patientId === uhid)))
           })
           uhidListenerRef.current = fn
           uhidListenerPath.current = path
@@ -218,7 +216,6 @@ export default function ManageOPDPage() {
 
   // ============ Phone Search - Real-Time, Only Matching Phones =============
   useEffect(() => {
-    // Clear previous listeners
     phoneListenerRefs.current.forEach(({ path, fn }) => off(ref(db, path), "child_added", fn))
     phoneListenerRefs.current = []
 
@@ -228,7 +225,6 @@ export default function ManageOPDPage() {
     const todayKey = getTodayDateKey()
     const opdPath = `patients/opddetail/${todayKey}`
 
-    // This will still download all today's data, but only processes matching phones. For true optimization, restructure db to index by phone.
     get(ref(db, opdPath)).then((snap) => {
       const data = snap.val()
       const result: Appointment[] = []
@@ -249,11 +245,10 @@ export default function ManageOPDPage() {
       setDownloadedBytes(totalBytes)
       setPhoneSearchLoading(false)
 
-      // Add listeners for each matched appointment
       result.forEach((appt) => {
         const path = `patients/opddetail/${todayKey}/${appt.patientId}`
         const fn = (snap: any) => {
-          setAppointments((prev) => {
+          setAppointments((prev: Appointment[]) => {
             const found = prev.find(a => a.id === snap.key && a.patientId === appt.patientId)
             if (found) return prev
             const val = snap.val()
@@ -267,7 +262,7 @@ export default function ManageOPDPage() {
         onChildAdded(ref(db, path), fn)
         phoneListenerRefs.current.push({ path, fn })
         onChildChanged(ref(db, path), (snap: any) => {
-          setAppointments((prev) =>
+          setAppointments((prev: Appointment[]) =>
             prev.map(a => (a.id === snap.key && a.patientId === appt.patientId)
               ? flattenAppointment(appt.patientId, snap.key, snap.val())
               : a
@@ -275,7 +270,7 @@ export default function ManageOPDPage() {
           )
         })
         onChildRemoved(ref(db, path), (snap: any) => {
-          setAppointments((prev) => prev.filter(a => !(a.id === snap.key && a.patientId === appt.patientId)))
+          setAppointments((prev: Appointment[]) => prev.filter(a => !(a.id === snap.key && a.patientId === appt.patientId)))
         })
       })
     })
@@ -286,7 +281,7 @@ export default function ManageOPDPage() {
     .filter((app) => {
       if (activeFilterTab !== "today") {
         return app.modalities.some(
-          (modality) =>
+          (modality: any) =>
             DOCTOR_MODALITY_TYPES.includes(modality.type) &&
             modality.doctor === activeFilterTab
         )
@@ -294,6 +289,46 @@ export default function ManageOPDPage() {
       return true
     })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+
+  // ==== DELETE LOGIC ====
+  const handleDeleteAppointment = (appt: Appointment) => {
+    setAppointmentToDelete(appt)
+    setDeletePassword("")
+    setDeleteError("")
+    setShowDeleteModal(true)
+  }
+
+  const confirmDeleteAppointment = async () => {
+    if (deletePassword !== "medford@788") {
+      setDeleteError("Incorrect password.")
+      return
+    }
+    if (!appointmentToDelete) {
+      setDeleteError("No appointment selected for deletion.")
+      return
+    }
+    setDeleting(true)
+    try {
+      const { patientId, id: appointmentId, date, appointmentType } = appointmentToDelete
+      const dateKey = format(new Date(date), "yyyy-MM-dd")
+      await remove(ref(db, `patients/opddetail/${dateKey}/${patientId}/${appointmentId}`))
+      if (appointmentType === "oncall") {
+        await remove(ref(db, `oncall-appointments/${appointmentId}`))
+      }
+      toast.success("Appointment cancelled and records deleted successfully!", { position: "top-right", autoClose: 4000 })
+      setShowDeleteModal(false)
+      setAppointmentToDelete(null)
+      setDeletePassword("")
+      setDeleteError("")
+      // Optionally refresh today list
+      setAppointments((prev: Appointment[]) => prev.filter(a => !(a.patientId === patientId && a.id === appointmentId)))
+    } catch (error) {
+      toast.error("Failed to cancel appointment.", { position: "top-right", autoClose: 5000 })
+      setDeleteError("An error occurred during cancellation.")
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   return (
     <TooltipProvider>
@@ -475,7 +510,7 @@ export default function ManageOPDPage() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right font-medium">
-                            ₹{app.payment?.totalPaid ?? app.modalities.reduce((sum, m) => sum + (m.charges || 0), 0)}
+                            ₹{app.payment?.totalPaid ?? app.modalities.reduce((sum: number, m: any) => sum + (m.charges || 0), 0)}
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-2">
@@ -503,7 +538,7 @@ export default function ManageOPDPage() {
                                   <Button
                                     variant="destructive"
                                     size="icon"
-                                    onClick={() => { /* your delete logic here */ }}
+                                    onClick={() => handleDeleteAppointment(app)}
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
@@ -521,6 +556,68 @@ export default function ManageOPDPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* =========== Delete Modal =========== */}
+        {showDeleteModal && appointmentToDelete && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+              <div className="flex justify-between items-center mb-4 border-b pb-4">
+                <h3 className="text-xl font-semibold text-red-700 flex items-center">
+                  <Trash2 className="h-6 w-6 mr-2" />
+                  Confirm Deletion
+                </h3>
+                <button onClick={() => setShowDeleteModal(false)} className="text-gray-500 hover:text-gray-700">
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+              <p className="text-gray-700 mb-4">
+                Are you sure you want to delete the appointment for{" "}
+                <span className="font-semibold">{appointmentToDelete.name}</span> (UHID:{" "}
+                <span className="font-semibold">{appointmentToDelete.patientId}</span>)?
+                <br />
+                This action will permanently remove this appointment record.
+              </p>
+              <div className="mb-4">
+                <label htmlFor="delete-password" className="block text-sm font-medium text-gray-700 mb-1">
+                  Enter Password to Confirm:
+                </label>
+                <Input
+                  id="delete-password"
+                  type="password"
+                  value={deletePassword}
+                  onChange={(e) => {
+                    setDeletePassword(e.target.value)
+                    setDeleteError("")
+                  }}
+                  placeholder="Enter password"
+                  className={deleteError ? "border-red-500" : ""}
+                />
+                {deleteError && (
+                  <p className="text-red-500 text-sm mt-1 flex items-center">
+                    <AlertCircle className="h-4 w-4 mr-1" />
+                    {deleteError}
+                  </p>
+                )}
+              </div>
+              <div className="flex justify-end gap-3">
+                <Button variant="outline" onClick={() => setShowDeleteModal(false)}>
+                  Cancel
+                </Button>
+                <Button variant="destructive" onClick={confirmDeleteAppointment} disabled={deleting}>
+                  {deleting ? (
+                    <>
+                      <div className="mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    "Delete Appointment"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </TooltipProvider>
   )
