@@ -1,26 +1,25 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { db, auth } from "@/lib/firebase"
 import { ref, push, update, onValue, set, remove } from "firebase/database"
-import Head from "next/head"
 import { onAuthStateChanged } from "firebase/auth"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
-import { User, Clock, CheckCircle, Hospital, PhoneCall } from "lucide-react"
 import { useRouter } from "next/navigation"
-
 import { PatientForm } from "./patient-form"
 import { OnCallAppointments } from "./oncall-appointments"
-
 import type { IFormInput, PatientRecord, Doctor, ModalitySelection, OnCallAppointment } from "./types"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { generateNextUHID } from "@/components/uhid-generator" // Import the new UHID generator
+import { generateNextUHID } from "@/components/uhid-generator"
+import { CheckCircle, User, Clock, Hospital, PhoneCall } from "lucide-react"
+import Head from "next/head"
+// ----------- Import the utility PDF function -------------
+import { openBillInNewTabProgrammatically } from "@/app/edit-appointment/bill-generator"
 
 function formatAMPM(date: Date): string {
   const rawHours = date.getHours()
@@ -37,29 +36,20 @@ async function sendWhatsAppMessage(phone: string, message: string): Promise<bool
     const phoneWithCountryCode = `91${phone.replace(/\D/g, "")}`
     const response = await fetch("https://wa.medblisss.com/send-text", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         token: "99583991573",
         number: phoneWithCountryCode,
         message: message,
       }),
     })
-    if (response.ok) {
-      console.log("WhatsApp message sent successfully")
-      return true
-    } else {
-      console.error("Failed to send WhatsApp message:", response.statusText)
-      return false
-    }
-  } catch (error) {
-    console.error("Error sending WhatsApp message:", error)
+    return response.ok
+  } catch {
     return false
   }
 }
 
-// Generate professional WhatsApp messages
+// Generate professional WhatsApp messages function
 function generateAppointmentMessage(data: IFormInput, uhid: string, appointmentType: "hospital" | "oncall"): string {
   const appointmentDate = data.date.toLocaleDateString("en-IN", {
     weekday: "long",
@@ -67,29 +57,21 @@ function generateAppointmentMessage(data: IFormInput, uhid: string, appointmentT
     month: "long",
     day: "numeric",
   })
-
   if (appointmentType === "oncall") {
     return `🏥 *APPOINTMENT CONFIRMATION*
-Dear ${data.name},
-
-Your *On-Call Appointment* has been successfully registered!
-
+Dear ${data.name}, Your *On-Call Appointment* has been successfully registered!
 📋 *Appointment Details:*
 • Patient ID: ${uhid}
 • Date: ${appointmentDate}
 • Time: ${data.time}
 • Type: On-Call Consultation
 ${data.referredBy ? `• Referred By: ${data.referredBy}` : ""}
-
 📞 Our medical team will contact you at the scheduled time.
 ${data.message ? `📝 *Notes:* ${data.message}` : ""}
-
 For any queries, please contact our reception.
 Thank you for choosing our healthcare services!
-
 * Medford Hospital *`
   } else {
-    // Hospital visit message
     const modalities = data.modalities || []
     const servicesText = modalities
       .map((m) => {
@@ -104,30 +86,23 @@ Thank you for choosing our healthcare services!
     const totalCharges = modalities.reduce((total, m) => total + m.charges, 0)
     const totalPaid = (Number(data.cashAmount) || 0) + (Number(data.onlineAmount) || 0)
     const discount = Number(data.discount) || 0
-
     return `🏥 *APPOINTMENT CONFIRMATION*
-Dear ${data.name},
-
-Your *Appointment* has been successfully booked!
-
+Dear ${data.name}, Your *Appointment* has been successfully booked!
 📋 *Appointment Details:*
 • Patient ID: ${uhid}
 • Date: ${appointmentDate}
 • Time: ${data.time}
 • Type: Hospital Visit
 ${data.referredBy ? `• Referred By: ${data.referredBy}` : ""}
-
 💰 *Payment Summary:*
 • Total Charges: ₹${totalCharges}
 ${discount > 0 ? `• Discount: ₹${discount}` : ""}
 • Amount Paid: ₹${totalPaid}
 • Payment Method: ${data.paymentMethod?.charAt(0).toUpperCase() + data.paymentMethod?.slice(1)}
 ${data.message ? `📝 *Notes:* ${data.message}` : ""}
-
 For any queries, please contact our reception.
 Thank you for choosing our healthcare services!
-
-*Gautami Medford NX Healthcare*`
+*Medford  Healthcare*`
   }
 }
 
@@ -139,22 +114,23 @@ export default function Page() {
   const [onCallAppointments, setOnCallAppointments] = useState<OnCallAppointment[]>([])
   const [patientSuggestions, setPatientSuggestions] = useState<PatientRecord[]>([])
   const [phoneSuggestions, setPhoneSuggestions] = useState<PatientRecord[]>([])
-  const [uhidSearchInput, setUhidSearchInput] = useState("") // New state for UHID search input
-  const [uhidSuggestions, setUhidSuggestions] = useState<PatientRecord[]>([]) // New state for UHID suggestions
+  const [uhidSearchInput, setUhidSearchInput] = useState("")
+  const [uhidSuggestions, setUhidSuggestions] = useState<PatientRecord[]>([])
   const [showNameSuggestions, setShowNameSuggestions] = useState(false)
   const [showPhoneSuggestions, setShowPhoneSuggestions] = useState(false)
-  const [showUhidSuggestions, setShowUhidSuggestions] = useState(false) // New state for UHID suggestion visibility
+  const [showUhidSuggestions, setShowUhidSuggestions] = useState(false)
   const [selectedPatient, setSelectedPatient] = useState<PatientRecord | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [activeTab, setActiveTab] = useState("booking")
+  const [lastUhid, setLastUhid] = useState<string | null>(null) // <-- added for UHID display
 
   const form = useForm<IFormInput>({
     defaultValues: {
       name: "",
       phone: "",
       age: undefined,
-      ageUnit: "years", // Default age unit
+      ageUnit: "years",
       gender: "",
       address: "",
       date: new Date(),
@@ -199,7 +175,7 @@ export default function Page() {
     const patientsRef = ref(db, "patients/patientinfo")
     return onValue(patientsRef, (snap) => {
       const data = snap.val() || {}
-      setGautamiPatients(Object.keys(data).map((key) => ({ id: key, ...data[key], uhid: key }))) // Ensure UHID is part of PatientRecord
+      setGautamiPatients(Object.keys(data).map((key) => ({ id: key, ...data[key], uhid: key })))
     })
   }, [])
 
@@ -257,100 +233,52 @@ export default function Page() {
     setValue("age", patient.age)
     setValue("gender", patient.gender || "")
     setValue("address", patient.address)
-    setUhidSearchInput(patient.uhid || "") // Set UHID search input to selected patient's UHID
+    setUhidSearchInput(patient.uhid || "")
     setShowNameSuggestions(false)
     setShowPhoneSuggestions(false)
-    setShowUhidSuggestions(false) // Hide UHID suggestions
+    setShowUhidSuggestions(false)
   }
-
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setValue("name", e.target.value)
     setSelectedPatient(null)
-    setUhidSearchInput("") // Clear UHID search when name changes
+    setUhidSearchInput("")
   }
-
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setValue("phone", e.target.value)
     setSelectedPatient(null)
-    setUhidSearchInput("") // Clear UHID search when phone changes
+    setUhidSearchInput("")
   }
-
   const handleUhidChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setUhidSearchInput(e.target.value)
-    setSelectedPatient(null) // Clear selected patient when UHID input changes
-    setValue("name", "") // Clear name and phone to avoid confusion
+    setSelectedPatient(null)
+    setValue("name", "")
     setValue("phone", "")
   }
 
-  // Calculate total charges from all modalities
-  const getTotalModalityCharges = () => {
-    const modalities = watch("modalities") || []
-    return modalities.reduce((total, modality) => total + modality.charges, 0)
-  }
-
-  const calculateTotalAmount = () => {
-    const cash = Number(watch("cashAmount")) || 0
-    const online = Number(watch("onlineAmount")) || 0
-    return cash + online
-  }
-
-  const validateAndSubmit = async (data: IFormInput) => {
-    const required: Array<keyof IFormInput> = ["name", "phone", "age", "ageUnit", "gender", "date", "time"] // Added ageUnit
-    // For hospital visits, validate modalities and payment
-    if (data.appointmentType === "visithospital") {
-      required.push("modalities")
-      // Validate modalities
-      if (!data.modalities || data.modalities.length === 0) {
-        toast.error("Please select at least one service")
-        return
-      }
-      required.push("paymentMethod")
-      if (data.paymentMethod === "mixed") {
-        required.push("cashAmount", "onlineAmount")
-      } else if (data.paymentMethod === "cash") {
-        required.push("cashAmount")
-      } else if (
-        data.paymentMethod === "online" ||
-        data.paymentMethod === "card-credit" ||
-        data.paymentMethod === "card-debit"
-      ) {
-        // Updated
-        required.push("onlineAmount")
-      }
-    }
-
-    const valid = await trigger(required as any)
-    if (!valid) {
-      toast.error("Please fill all required fields")
-      return
-    }
-    onSubmit(data)
-  }
-
+  // On submit booking
   const onSubmit = async (data: IFormInput) => {
     setIsSubmitting(true)
     try {
       // Determine UHID
       const uhid = selectedPatient?.id || (await generateNextUHID())
+      setLastUhid(uhid) // <-- store last used UHID to show on success
       if (!selectedPatient) {
-        // new patient
         await set(ref(db, `patients/patientinfo/${uhid}`), {
           name: data.name,
           phone: data.phone,
           age: data.age,
-          ageUnit: data.ageUnit, // Save age unit
+          ageUnit: data.ageUnit,
           gender: data.gender,
           address: data.address,
           createdAt: new Date().toISOString(),
           uhid,
         })
       } else {
-        // update existing
         await update(ref(db, `patients/patientinfo/${uhid}`), {
           name: data.name,
           phone: data.phone,
           age: data.age,
-          ageUnit: data.ageUnit, // Update age unit
+          ageUnit: data.ageUnit,
           gender: data.gender,
           address: data.address,
           updatedAt: new Date().toISOString(),
@@ -358,13 +286,12 @@ export default function Page() {
       }
 
       if (data.appointmentType === "oncall") {
-        // Save as on-call appointment
         const onCallRef = push(ref(db, "oncall-appointments"))
         await set(onCallRef, {
           name: data.name,
           phone: data.phone,
           age: data.age,
-          ageUnit: data.ageUnit, // Save age unit
+          ageUnit: data.ageUnit,
           gender: data.gender,
           patientId: uhid,
           date: data.date.toISOString(),
@@ -374,40 +301,26 @@ export default function Page() {
           enteredBy: currentUserEmail || "unknown",
           createdAt: new Date().toISOString(),
         })
-        // Send WhatsApp message for on-call appointment
+
         const professionalMessage = generateAppointmentMessage(data, uhid, "oncall")
-        const messageSent = await sendWhatsAppMessage(data.phone, professionalMessage)
-        if (messageSent) {
-          toast.success("On-call appointment registered successfully! Confirmation sent via WhatsApp.")
-        } else {
-          toast.success("On-call appointment registered successfully!")
-          toast.warning("WhatsApp message could not be sent. Please contact the patient manually.")
-        }
+        await sendWhatsAppMessage(data.phone, professionalMessage)
       } else {
-        // Hospital visit - existing logic
         const cash = Number(data.cashAmount) || 0
         const online = Number(data.onlineAmount) || 0
         const discount = Number(data.discount) || 0
-        // Calculate total charges from all modalities (before discount)
-        const totalCharges = getTotalModalityCharges()
-        // Total amount paid
-        const totalPaid = cash + online
-        // push OPD record
+        const totalCharges = (data.modalities || []).reduce((total, m) => total + m.charges, 0)
         const appointmentDateKey =
           data.date instanceof Date
             ? data.date.toISOString().slice(0, 10)
             : new Date(data.date).toISOString().slice(0, 10)
-        // Save under: /patients/opddetail/yyyy-MM-dd/{uhid}/{appointmentId}
         const opdRef = push(ref(db, `patients/opddetail/${appointmentDateKey}/${uhid}`))
-        // Store all modalities as a separate array in the database
         const modalitiesData = data.modalities.map((modality: ModalitySelection) => {
-          // Find doctor name from ID
           const doctorName = modality.doctor
             ? doctors.find((d) => d.id === modality.doctor)?.name || modality.doctor
             : null
           return {
             type: modality.type,
-            doctor: doctorName, // Save doctor name instead of ID
+            doctor: doctorName,
             specialist: modality.specialist || null,
             visitType: modality.visitType || null,
             service: modality.service || null,
@@ -421,7 +334,7 @@ export default function Page() {
           patientId: uhid,
           date: data.date.toISOString(),
           time: data.time,
-          doctor: data.doctor ? doctors.find((d) => d.id === data.doctor)?.name || data.doctor : null, // Save doctor name instead of ID
+          doctor: data.doctor ? doctors.find((d) => d.id === data.doctor)?.name || data.doctor : null,
           modalities: modalitiesData,
           visitType: data.visitType,
           study: data.study,
@@ -432,7 +345,6 @@ export default function Page() {
           enteredBy: currentUserEmail || "unknown",
           createdAt: new Date().toISOString(),
         })
-        // payment - store total charges without discount
         const opdId = opdRef.key
         if (opdId) {
           await set(ref(db, `patients/opddetail/${appointmentDateKey}/${uhid}/${opdId}/payment`), {
@@ -440,21 +352,23 @@ export default function Page() {
             onlineAmount: online,
             paymentMethod: data.paymentMethod,
             discount,
-            totalCharges: totalCharges, // Total charges before discount
-            totalPaid: totalPaid, // Total amount paid (cash + online)
+            totalCharges: totalCharges,
+            totalPaid: cash + online,
             createdAt: new Date().toISOString(),
           })
         }
-        // Send WhatsApp message for hospital appointment
         const professionalMessage = generateAppointmentMessage(data, uhid, "hospital")
-        const messageSent = await sendWhatsAppMessage(data.phone, professionalMessage)
-        if (messageSent) {
-          toast.success("Hospital appointment booked successfully! Confirmation sent via WhatsApp.")
-        } else {
-          toast.success("Hospital appointment booked successfully!")
-          toast.warning("WhatsApp message could not be sent. Please contact the patient manually.")
-        }
+        await sendWhatsAppMessage(data.phone, professionalMessage)
       }
+
+      // ---------------- AUTO OPEN BILL PDF in new tab ------------------
+      await openBillInNewTabProgrammatically(
+        { ...data, date: data.date },
+        uhid, // Always pass the generated or selected UHID here
+        doctors.map((d) => ({ id: d.id, name: d.name }))
+      )
+      
+
       setIsSubmitted(true)
       setTimeout(() => {
         setIsSubmitted(false)
@@ -462,7 +376,7 @@ export default function Page() {
           name: "",
           phone: "",
           age: undefined,
-          ageUnit: "years", // Reset age unit
+          ageUnit: "years",
           gender: "",
           address: "",
           date: new Date(),
@@ -482,7 +396,8 @@ export default function Page() {
           referredBy: "",
         })
         setSelectedPatient(null)
-        setUhidSearchInput("") // Clear UHID search input on form reset
+        setUhidSearchInput("")
+        setLastUhid(null) // Clear UHID after reset if you want
       }, 3000)
     } catch (err) {
       console.error(err)
@@ -557,6 +472,13 @@ export default function Page() {
               <CheckCircle className="h-16 w-16 text-green-500 mx-auto" />
               <h2 className="text-2xl font-bold text-green-700">Appointment Registered!</h2>
               <p className="text-gray-600">Your appointment has been successfully registered.</p>
+              {lastUhid && (
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-sm font-semibold text-blue-700">
+                    Patient UHID: <span className="font-mono">{lastUhid}</span>
+                  </span>
+                </div>
+              )}
               <p className="text-sm text-gray-500">WhatsApp confirmation sent to patient.</p>
               <p className="text-sm text-gray-500">Resetting form shortly...</p>
             </div>
@@ -609,25 +531,25 @@ export default function Page() {
                 </TabsTrigger>
               </TabsList>
               <TabsContent value="booking" className="p-6 mt-0">
-                <form onSubmit={handleSubmit(validateAndSubmit)} className="space-y-6">
+                <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
                   <PatientForm
                     form={form}
                     doctors={doctors}
                     patientSuggestions={patientSuggestions}
                     phoneSuggestions={phoneSuggestions}
-                    uhidSearchInput={uhidSearchInput} // Pass UHID search input
-                    uhidSuggestions={uhidSuggestions} // Pass UHID suggestions
+                    uhidSearchInput={uhidSearchInput}
+                    uhidSuggestions={uhidSuggestions}
                     showNameSuggestions={showNameSuggestions}
                     showPhoneSuggestions={showPhoneSuggestions}
-                    showUhidSuggestions={showUhidSuggestions} // Pass UHID suggestion visibility
+                    showUhidSuggestions={showUhidSuggestions}
                     selectedPatient={selectedPatient}
                     onPatientSelect={handlePatientSelect}
                     onNameChange={handleNameChange}
                     onPhoneChange={handlePhoneChange}
-                    onUhidChange={handleUhidChange} // Pass UHID change handler
+                    onUhidChange={handleUhidChange}
                     setShowNameSuggestions={setShowNameSuggestions}
                     setShowPhoneSuggestions={setShowPhoneSuggestions}
-                    setShowUhidSuggestions={setShowUhidSuggestions} // Pass UHID suggestion visibility setter
+                    setShowUhidSuggestions={setShowUhidSuggestions}
                   />
                   <div className="flex justify-end pt-6 border-t bg-gray-50 -mx-6 px-6 -mb-6 pb-6">
                     <Button

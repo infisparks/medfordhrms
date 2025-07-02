@@ -1,13 +1,11 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect, useCallback } from "react"
 import { db } from "@/lib/firebase"
-import { eachDayOfInterval } from "date-fns"
-import { ref, query, get, remove } from "firebase/database" // Import remove
+import { eachDayOfInterval, format } from "date-fns"
+import { ref, query, get, remove } from "firebase/database"
 import { useRouter } from "next/navigation"
-import { format } from "date-fns"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -18,10 +16,9 @@ import { EditButton } from "./edit-button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Calendar, RefreshCw, Eye, ArrowUpDown, X, Filter, Trash2, AlertCircle, Users } from "lucide-react"
-import { ToastContainer, toast } from "react-toastify" // Ensure ToastContainer is imported
-import "react-toastify/dist/ReactToastify.css" // Ensure CSS is imported
+import { ToastContainer, toast } from "react-toastify"
+import "react-toastify/dist/ReactToastify.css"
 
-// === Helpers for download size ===
 function byteSize(str: string) {
   return new Blob([str]).size
 }
@@ -51,6 +48,9 @@ interface Appointment {
   }
 }
 
+// Only these modalities count for tabs/filters
+const DOCTOR_MODALITY_TYPES = ["consultation", "radiology", "cardiology"]
+
 const getTodayDateKey = () => format(new Date(), "yyyy-MM-dd")
 
 const flattenAppointments = (snap: Record<string, any> | null | undefined, filterFn: (a: any) => boolean) => {
@@ -61,12 +61,12 @@ const flattenAppointments = (snap: Record<string, any> | null | undefined, filte
       Object.entries(apps as Record<string, any>).forEach(([apptId, data]) => {
         const appointmentData = {
           id: apptId,
-          patientId: patientId, // Capture patientId as UHID
+          patientId: patientId,
           name: data.name || "",
           phone: data.phone || "",
           date: data.date || "",
           time: data.time || "",
-          doctor: data.doctor || "", // Main consulting doctor
+          doctor: data.doctor || "",
           appointmentType: data.appointmentType || "visithospital",
           modalities: data.modalities || [],
           createdAt: data.createdAt || "",
@@ -86,10 +86,29 @@ const flattenAppointments = (snap: Record<string, any> | null | undefined, filte
   return result
 }
 
+function collectDoctorTabs(appointments: Appointment[]) {
+  // Count patients for each doctor for these modalities (consultation, radiology, cardiology)
+  const docTabMap = new Map<string, { name: string; count: number }>()
+  appointments.forEach(app => {
+    if (app.appointmentType === "visithospital" && Array.isArray(app.modalities)) {
+      const uniqueDoctors = new Set<string>()
+      app.modalities.forEach(modality => {
+        if (DOCTOR_MODALITY_TYPES.includes(modality.type) && modality.doctor) {
+          uniqueDoctors.add(modality.doctor)
+        }
+      })
+      uniqueDoctors.forEach(docName => {
+        docTabMap.set(docName, { name: docName, count: (docTabMap.get(docName)?.count || 0) + 1 })
+      })
+    }
+  })
+  return Array.from(docTabMap.values()).sort((a, b) => b.count - a.count)
+}
+
 export default function ManageOPDPage() {
   const router = useRouter()
-  const [activeFilterTab, setActiveFilterTab] = useState<string>("today") // Can be "today" or a doctor's name
-  const [appointments, setAppointments] = useState<Appointment[]>([]) // All today's appointments
+  const [activeFilterTab, setActiveFilterTab] = useState<string>("today")
+  const [appointments, setAppointments] = useState<Appointment[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [searching, setSearching] = useState(false)
@@ -102,19 +121,17 @@ export default function ManageOPDPage() {
   const [downloadedBytes, setDownloadedBytes] = useState(0)
   const [doctorTabs, setDoctorTabs] = useState<{ name: string; count: number }[]>([])
 
-  // State for deletion modal
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deletePassword, setDeletePassword] = useState("")
   const [deleteError, setDeleteError] = useState("")
   const [appointmentToDelete, setAppointmentToDelete] = useState<Appointment | null>(null)
 
-  // Fetch only today's data
+  // --- Fetch only today's data ---
   const fetchTodayAppointments = useCallback(async () => {
     setIsLoading(true)
     setError(null)
-    setSearchTerm("") // Clear search term when fetching new data
-    setActiveFilterTab("today") // Reset active filter tab
-
+    setSearchTerm("")
+    setActiveFilterTab("today")
     try {
       const todayKey = getTodayDateKey()
       const opdRef = ref(db, `patients/opddetail/${todayKey}`)
@@ -124,22 +141,7 @@ export default function ManageOPDPage() {
       setAppointments(result)
       setDownloadedCount(result.length)
       setDownloadedBytes(byteSize(JSON.stringify(data || {})))
-
-      // Calculate doctor consultation counts for dynamic tabs based on modalities
-      const doctorCounts: { [key: string]: number } = {}
-      result.forEach((app) => {
-        if (app.appointmentType === "visithospital" && app.modalities && Array.isArray(app.modalities)) {
-          app.modalities.forEach((modality) => {
-            if (modality.type === "consultation" && modality.doctor) {
-              doctorCounts[modality.doctor] = (doctorCounts[modality.doctor] || 0) + 1
-            }
-          })
-        }
-      })
-      const sortedDoctors = Object.entries(doctorCounts)
-        .map(([name, count]) => ({ name, count }))
-        .sort((a, b) => b.count - a.count)
-      setDoctorTabs(sortedDoctors)
+      setDoctorTabs(collectDoctorTabs(result))
     } catch (err) {
       setError("Failed to load today's appointments")
       setAppointments([])
@@ -151,7 +153,7 @@ export default function ManageOPDPage() {
     }
   }, [])
 
-  // Fetch historical data for search (e.g., last 90 days)
+  // --- Fetch historical data for search (e.g., last 90 days) ---
   const fetchHistoricalAppointments = useCallback(async (term: string) => {
     const results: Appointment[] = []
     let totalBytes = 0
@@ -179,7 +181,7 @@ export default function ManageOPDPage() {
           (a) =>
             (a.name || "").toLowerCase().includes(t) ||
             (a.phone || "").includes(t) ||
-            (a.patientId || "").toLowerCase().includes(t), // Added search by patientId (UHID)
+            (a.patientId || "").toLowerCase().includes(t)
         )
         results.push(...filtered)
         totalBytes += byteSize(JSON.stringify(data))
@@ -191,17 +193,45 @@ export default function ManageOPDPage() {
     return results
   }, [])
 
-  // Search only when search term is >= 6 characters
+  // --- SEARCH LOGIC update ---
   useEffect(() => {
     const timeout = setTimeout(async () => {
-      if (searchTerm.length >= 6) {
+      if (searchTerm.length > 0 && searchTerm.length < 6) {
+        setSearching(true)
+        setError(null)
+        try {
+          const todayKey = getTodayDateKey()
+          const opdRef = ref(db, `patients/opddetail/${todayKey}`)
+          const snap = await get(query(opdRef))
+          const data = snap.val() as Record<string, any> | null
+          const results = flattenAppointments(
+            data,
+            (a) =>
+              (a.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+              (a.phone || "").includes(searchTerm) ||
+              (a.patientId || "").toLowerCase().includes(searchTerm.toLowerCase())
+          )
+          setAppointments(results)
+          setDownloadedCount(results.length)
+          setDownloadedBytes(byteSize(JSON.stringify(data || {})))
+          setDoctorTabs(collectDoctorTabs(results))
+          setActiveFilterTab("today")
+        } catch (err) {
+          setError("Failed to search today's appointments")
+          setAppointments([])
+          setDownloadedCount(0)
+          setDownloadedBytes(0)
+        } finally {
+          setSearching(false)
+        }
+      } else if (searchTerm.length >= 6) {
         setSearching(true)
         setError(null)
         try {
           const historicalResults = await fetchHistoricalAppointments(searchTerm)
-          setAppointments(historicalResults) // Update main appointments state with search results
-          setDoctorTabs([]) // Clear doctor tabs when in search mode
-          setActiveFilterTab("today") // Keep "today" tab active visually for search results
+          setAppointments(historicalResults)
+          setDoctorTabs([]) // No tabs in historical search
+          setActiveFilterTab("today")
         } catch (err) {
           setError("Failed to search historical appointments")
           setAppointments([])
@@ -210,11 +240,10 @@ export default function ManageOPDPage() {
         } finally {
           setSearching(false)
         }
-      } else {
-        // If search term is too short, revert to today's data
+      } else if (searchTerm.length === 0) {
         setSearching(false)
         setError(null)
-        fetchTodayAppointments() // Re-fetch today's data and re-populate doctor tabs
+        fetchTodayAppointments()
       }
     }, 500)
 
@@ -226,26 +255,15 @@ export default function ManageOPDPage() {
     fetchTodayAppointments()
   }, [fetchTodayAppointments])
 
-  // Filtering based on activeFilterTab and searchTerm
+  // --- Filter based on tab doctor name ---
   const filteredAndSortedAppointments = [...appointments]
     .filter((app) => {
-      // Apply doctor filter if activeFilterTab is a doctor's name
       if (activeFilterTab !== "today") {
-        // Check if any modality is a consultation by the selected doctor
-        const hasConsultationByDoctor = app.modalities.some(
-          (modality) => modality.type === "consultation" && modality.doctor === activeFilterTab,
-        )
-        if (!hasConsultationByDoctor) {
-          return false
-        }
-      }
-      // Apply search term filter
-      const term = searchTerm.trim().toLowerCase()
-      if (term.length >= 6) {
-        return (
-          (app.name || "").toLowerCase().includes(term) ||
-          (app.phone || "").includes(term) ||
-          (app.patientId || "").toLowerCase().includes(term)
+        // show if any of their modalities in today is cons/rad/cardio for this doctor
+        return app.modalities.some(
+          (modality) =>
+            DOCTOR_MODALITY_TYPES.includes(modality.type) &&
+            modality.doctor === activeFilterTab
         )
       }
       return true
@@ -257,7 +275,6 @@ export default function ManageOPDPage() {
         const db = new Date(b.date).getTime()
         return direction === "asc" ? da - db : db - da
       }
-      // Handle sorting for patientId, name, phone
       if (key === "name" || key === "phone" || key === "patientId") {
         const va = (a as any)[key] || ""
         const vb = (b as any)[key] || ""
@@ -277,44 +294,31 @@ export default function ManageOPDPage() {
 
   // Confirm deletion after password input
   const confirmDeleteAppointment = async () => {
-    if (deletePassword !== "medford@786") {
+    if (deletePassword !== "medford@788") {
       setDeleteError("Incorrect password.")
       return
     }
-
     if (!appointmentToDelete) {
       setDeleteError("No appointment selected for deletion.")
       return
     }
-
-    setIsLoading(true) // Show loading state during deletion
+    setIsLoading(true)
     try {
       const { patientId, id: appointmentId, date, appointmentType } = appointmentToDelete
       const dateKey = format(new Date(date), "yyyy-MM-dd")
-
-      // 1. Delete from patients/opddetail/{dateKey}/{uhid}/{appointmentId}
       await remove(ref(db, `patients/opddetail/${dateKey}/${patientId}/${appointmentId}`))
-
-      // 2. If it's an on-call appointment, delete from oncall-appointments/{appointmentId}
       if (appointmentType === "oncall") {
         await remove(ref(db, `oncall-appointments/${appointmentId}`))
       }
-
-      toast.success("Appointment cancelled and records deleted successfully!", {
-        position: "top-right",
-        autoClose: 5000,
-      })
+      toast.success("Appointment cancelled and records deleted successfully!", { position: "top-right", autoClose: 5000 })
       setShowDeleteModal(false)
       setAppointmentToDelete(null)
       setDeletePassword("")
       setDeleteError("")
-      fetchTodayAppointments() // Re-fetch data to update the list
+      fetchTodayAppointments()
     } catch (error) {
       console.error("Error cancelling appointment:", error)
-      toast.error("Failed to cancel appointment.", {
-        position: "top-right",
-        autoClose: 5000,
-      })
+      toast.error("Failed to cancel appointment.", { position: "top-right", autoClose: 5000 })
       setDeleteError("An error occurred during cancellation.")
     } finally {
       setIsLoading(false)
@@ -324,7 +328,7 @@ export default function ManageOPDPage() {
   return (
     <TooltipProvider>
       <div className="min-h-screen bg-slate-50">
-        <ToastContainer /> {/* ToastContainer for notifications */}
+        <ToastContainer />
         <div className="bg-white shadow-sm border-b sticky top-0 z-10">
           <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -373,7 +377,6 @@ export default function ManageOPDPage() {
               ))}
             </TabsList>
           </Tabs>
-
           <Card className="mb-6 border border-slate-200 shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">
@@ -414,12 +417,12 @@ export default function ManageOPDPage() {
                 {filteredAndSortedAppointments.length
                   ? `${filteredAndSortedAppointments.length} found`
                   : isLoading
-                    ? "Loading..."
-                    : "No appointments"}
+                  ? "Loading..."
+                  : "No appointments"}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {isLoading && !searching ? ( // Show skeleton only when initial loading or refreshing, not during search
+              {isLoading && !searching ? (
                 <div className="space-y-2">
                   {Array.from({ length: 6 }).map((_, i) => (
                     <Skeleton key={i} className="h-16 w-full" />
@@ -529,8 +532,6 @@ export default function ManageOPDPage() {
           </Card>
         </div>
       </div>
-
-      {/* Delete Confirmation Modal */}
       {showDeleteModal && appointmentToDelete && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
@@ -560,7 +561,7 @@ export default function ManageOPDPage() {
                 value={deletePassword}
                 onChange={(e) => {
                   setDeletePassword(e.target.value)
-                  setDeleteError("") // Clear error on input change
+                  setDeleteError("")
                 }}
                 placeholder="Enter password"
                 className={deleteError ? "border-red-500" : ""}

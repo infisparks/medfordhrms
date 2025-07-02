@@ -363,7 +363,7 @@ export default function OptimizedPatientsPage() {
 
   // Confirm cancellation after password input
   const confirmCancelAppointment = async () => {
-    if (cancelPassword !== "medford@786") {
+    if (cancelPassword !== "medford@788") {
       setCancelError("Incorrect password.")
       return
     }

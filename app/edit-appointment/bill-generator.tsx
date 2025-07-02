@@ -442,3 +442,214 @@ export function BillGenerator({
     </div>
   )
 }
+
+
+
+
+
+
+
+
+
+
+// Utility function for programmatically opening bill PDF in a new tab
+export async function openBillInNewTabProgrammatically(
+  appointmentData: IFormInput,
+  patientId?: string,
+  doctors: DoctorLite[] = []
+) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const pageHeight = doc.internal.pageSize.getHeight()
+  // --- All logic from your viewPDF, copy/paste as below ---
+  try {
+    const img = new Image()
+    img.crossOrigin = "anonymous"
+    await new Promise((res, rej) => {
+      img.onload = res
+      img.onerror = rej
+      img.src = "/letterhead.png"
+    })
+    doc.addImage(img, "PNG", 0, 0, pageWidth, pageHeight)
+  } catch {}
+  let yPos = 55
+  doc.setFontSize(9)
+  doc.setFont("helvetica", "normal")
+  doc.text(
+    `Date: ${format(appointmentData.date, "dd/MM/yyyy")} | Time: ${appointmentData.time}`,
+    pageWidth - 20,
+    yPos,
+    { align: "right" }
+  )
+  yPos += 8
+  doc.setFontSize(11)
+  doc.setFont("helvetica", "bold")
+  doc.setFillColor(240, 248, 255)
+  doc.rect(20, yPos - 2, pageWidth - 40, 6, "F")
+  doc.text("PATIENT INFORMATION", 22, yPos + 2)
+  yPos += 10
+  const leftX = 22
+  const rightX = pageWidth / 2 + 20
+  doc.setFontSize(9)
+  doc.setFont("helvetica", "normal")
+  const writePair = (label: string, value: string) => {
+    doc.setFont("helvetica", "bold")
+    doc.text(label, leftX, yPos)
+    doc.setFont("helvetica", "normal")
+    doc.text(value, leftX + 18, yPos)
+    yPos += 5
+  }
+  writePair("Name:", appointmentData.name)
+  writePair("Phone:", appointmentData.phone)
+  writePair(
+    "Gender:",
+    appointmentData.gender
+      ? appointmentData.gender.charAt(0).toUpperCase() + appointmentData.gender.slice(1)
+      : "-"
+  )
+  let rightY = yPos - 15
+  if (patientId) {
+    doc.setFont("helvetica", "bold")
+    doc.text("UHID:", rightX, rightY)
+    doc.setFont("helvetica", "normal")
+    doc.text(patientId, rightX + 15, rightY)
+  }
+  rightY += 5
+  doc.setFont("helvetica", "bold")
+  doc.text("Age:", rightX, rightY)
+  doc.setFont("helvetica", "normal")
+  doc.text(`${appointmentData.age ?? "-"} ${appointmentData.ageUnit || "years"}`, rightX + 15, rightY)
+  yPos = Math.max(yPos, rightY) + 5
+  doc.setFontSize(8)
+  doc.setFont("helvetica", "bold")
+  doc.setFillColor(220, 220, 220)
+  doc.rect(20, yPos - 2, pageWidth - 40, 5, "F")
+  doc.text("No.", 22, yPos + 1)
+  doc.text("Service", 32, yPos + 1)
+  doc.text("Doctor/Specialist", 75, yPos + 1)
+  doc.text("Details", 125, yPos + 1)
+  doc.text("Amount", pageWidth - 22, yPos + 1, { align: "right" })
+  yPos += 7
+  doc.setFont("helvetica", "normal")
+  let totalCharges = 0
+  const getDoctorNameById = (doctorId: string): string => {
+    if (!doctorId) return "-"
+    const docData = doctors.find((d) => d.id === doctorId)
+    return docData ? docData.name : doctorId
+  }
+  appointmentData.modalities?.forEach((m: any, i: number) => {
+    if (yPos > pageHeight - 50) {
+      doc.addPage()
+      try {
+        doc.addImage("/letterhead.png", "PNG", 0, 0, pageWidth, pageHeight)
+      } catch {}
+      yPos = 30
+    }
+    if (i % 2 === 0) {
+      doc.setFillColor(250, 250, 250)
+      doc.rect(20, yPos - 1, pageWidth - 40, 4, "F")
+    }
+    const svc = m.type.charAt(0).toUpperCase() + m.type.slice(1)
+    const docName = getDoctorNameById(m.doctor || "")
+    const details = m.service || m.specialist || "-"
+    const amt = m.charges || 0
+    doc.text(String(i + 1), 22, yPos + 1)
+    doc.text(svc.length > 15 ? `${svc.slice(0, 15)}…` : svc, 32, yPos + 1)
+    doc.text(docName.length > 18 ? `${docName.slice(0, 18)}…` : docName, 75, yPos + 1)
+    doc.text(details.length > 20 ? `${details.slice(0, 20)}…` : details, 125, yPos + 1)
+    doc.text(`Rs. ${amt}`, pageWidth - 22, yPos + 1, { align: "right" })
+    totalCharges += amt
+    yPos += 4
+  })
+  yPos += 7
+  doc.setFontSize(11)
+  doc.setFont("helvetica", "bold")
+  doc.setFillColor(240, 248, 255)
+  doc.rect(20, yPos - 2, pageWidth - 40, 6, "F")
+  doc.text("PAYMENT SUMMARY", 22, yPos + 2)
+  yPos += 10
+  const discount = Number(appointmentData.discount) || 0
+  const cash = Number(appointmentData.cashAmount) || 0
+  const online = Number(appointmentData.onlineAmount) || 0
+  const paid = cash + online
+  const net = totalCharges - discount
+  const due = net - paid
+  const sx = pageWidth - 70
+  doc.setFontSize(9)
+  doc.setFont("helvetica", "bold")
+  doc.text("Total Charges:", sx - 35, yPos)
+  doc.setFont("helvetica", "normal")
+  doc.text(`Rs. ${totalCharges}`, pageWidth - 22, yPos, { align: "right" })
+  yPos += 4
+  if (discount > 0) {
+    doc.setFont("helvetica", "bold")
+    doc.setTextColor(200, 0, 0)
+    doc.text("Discount:", sx - 35, yPos)
+    doc.setFont("helvetica", "normal")
+    doc.text(`Rs. ${discount}`, pageWidth - 22, yPos, { align: "right" })
+    doc.setTextColor(0, 0, 0)
+    yPos += 4
+  }
+  doc.setDrawColor(0, 0, 0)
+  doc.line(sx - 35, yPos, pageWidth - 20, yPos)
+  yPos += 3
+  doc.setFont("helvetica", "bold")
+  doc.text("Net Amount:", sx - 35, yPos)
+  doc.text(`Rs. ${net}`, pageWidth - 22, yPos, { align: "right" })
+  yPos += 5
+  if (appointmentData.appointmentType === "visithospital") {
+    doc.setFont("helvetica", "normal")
+    const line = (lbl: string, val: number) => {
+      doc.text(lbl, sx - 35, yPos)
+      doc.text(`Rs. ${val}`, pageWidth - 22, yPos, { align: "right" })
+      yPos += 5
+    }
+    if (appointmentData.paymentMethod === "mixed") {
+      line("Cash Paid:", cash)
+      line("Online Paid:", online)
+    } else if (appointmentData.paymentMethod === "cash") {
+      line("Cash Paid:", cash)
+    } else if (
+      appointmentData.paymentMethod === "online" ||
+      appointmentData.paymentMethod === "card-credit" ||
+      appointmentData.paymentMethod === "card-debit"
+    ) {
+      line(appointmentData.paymentMethod === "online" ? "Online Paid:" : "Card Paid:", online)
+    }
+    doc.setFont("helvetica", "bold")
+    doc.text("Total Paid:", sx - 35, yPos)
+    doc.text(`Rs. ${paid}`, pageWidth - 22, yPos, { align: "right" })
+    yPos += 5
+  }
+  if (due > 0) {
+    doc.setFont("helvetica", "bold")
+    doc.setTextColor(200, 0, 0)
+    doc.text("Due Amount:", sx - 35, yPos)
+    doc.text(`Rs. ${due}`, pageWidth - 22, yPos, { align: "right" })
+    doc.setTextColor(0, 0, 0)
+    yPos += 5
+  }
+  doc.setFontSize(9)
+  doc.setFont("helvetica", "italic")
+  const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+  yPos += 5
+  doc.text(`Total Paid (in words): ${capitalize(toWords(paid))} only`, 20, yPos)
+  yPos += 5
+  if (due > 0) {
+    doc.text(`Due Amount (in words): ${capitalize(toWords(due))} only`, 20, yPos)
+    yPos += 5
+  }
+  // Open as blob in new tab
+  const pdfBlob = doc.output("blob")
+  const blobUrl = URL.createObjectURL(pdfBlob)
+  const newWindow = window.open(blobUrl, "_blank")
+  if (newWindow) {
+    newWindow.focus()
+    setTimeout(() => {
+      URL.revokeObjectURL(blobUrl)
+    }, 1000)
+  } else {
+    alert("Please allow popups to view the bill in a new tab")
+    URL.revokeObjectURL(blobUrl)
+  }
+}
