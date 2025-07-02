@@ -129,7 +129,7 @@ export default function ManageOPDPage() {
     const opdRef = ref(db, `patients/opddetail/${todayKey}`)
     get(opdRef).then((snap) => {
       const data = snap.val()
-      let result: Appointment[] = []
+      const result: Appointment[] = []
       let totalBytes = 0
       if (data) {
         Object.entries(data).forEach(([uhid, appts]: any) => {
@@ -163,7 +163,7 @@ export default function ManageOPDPage() {
     // Search by prefix, download only matching UHIDs
     get(ref(db, opdPath)).then((snap) => {
       const data = snap.val()
-      let result: Appointment[] = []
+      const result: Appointment[] = []
       let totalBytes = 0
       if (data) {
         Object.entries(data).forEach(([uhid, appts]: any) => {
@@ -231,7 +231,7 @@ export default function ManageOPDPage() {
     // This will still download all today's data, but only processes matching phones. For true optimization, restructure db to index by phone.
     get(ref(db, opdPath)).then((snap) => {
       const data = snap.val()
-      let result: Appointment[] = []
+      const result: Appointment[] = []
       let totalBytes = 0
       if (data) {
         Object.entries(data).forEach(([uhid, appts]: any) => {
