@@ -979,9 +979,9 @@ const IPDBookingPage: React.FC = () => {
 
       // 4. Send WhatsApp
 
-      const patientMessage = `MedZeal Official: Dear ${data.name}, your IPD admission appointment is confirmed. Your bed: ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"} has been allocated. Your UHID is ${patientUHID}. Thank you for choosing our hospital.`
+      const patientMessage = ` Dear ${data.name}, your IPD admission appointment is confirmed. Your bed: ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"} has been allocated. Your UHID is ${patientUHID}. Thank you for choosing our hospital.`
 
-      const relativeMessage = `MedZeal Official: Dear ${data.relativeName}, this is to inform you that the IPD admission for ${data.name} (UHID: ${patientUHID}) has been scheduled. The allocated bed is ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"}. Please contact us for further details.`
+      const relativeMessage = ` Dear ${data.relativeName}, this is to inform you that the IPD admission for ${data.name} (UHID: ${patientUHID}) has been scheduled. The allocated bed is ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"}. Please contact us for further details.`
 
       await sendWhatsAppMessage(data.phone, patientMessage)
 
