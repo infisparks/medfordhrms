@@ -8,7 +8,7 @@ import { jsPDF } from "jspdf"
 
 import html2canvas from "html2canvas"
 
-import { Download } from "lucide-react"
+import { Download, FileText } from "lucide-react"
 
 import letterhead from "@/public/letterhead.png"
 
@@ -282,22 +282,6 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
     return pdf
   }
 
-  const handleDownloadInvoice = async () => {
-    try {
-      const pdf = await generatePDF()
-
-      const fileName = record.dischargeDate
-        ? `Final_Invoice_${record.name}_${record.ipdId}.pdf`
-        : `Provisional_Invoice_${record.name}_${record.ipdId}.pdf`
-
-      pdf.save(fileName)
-    } catch (error) {
-      console.error(error)
-
-      alert("Failed to generate the invoice PDF.")
-    }
-  }
-
   const handleSendPdfOnWhatsapp = async () => {
     try {
       const pdf = await generatePDF()
@@ -346,6 +330,18 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
       console.error(error)
 
       alert("An error occurred while sending the invoice PDF on WhatsApp.")
+    }
+  }
+
+  const handlePreviewInvoice = async () => {
+    try {
+      const pdf = await generatePDF()
+      const blob = pdf.output("blob")
+      const url = URL.createObjectURL(blob)
+      window.open(url, "_blank")
+    } catch (error) {
+      console.error(error)
+      alert("Failed to preview the invoice PDF.")
     }
   }
 
@@ -490,11 +486,11 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
       </button>
 
       <button
-        onClick={handleDownloadInvoice}
-        className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition duration-300 flex items-center mb-4 text-xs"
+        onClick={handlePreviewInvoice}
+        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition duration-300 flex items-center mb-4 text-xs"
       >
-        <Download size={16} className="mr-1" />
-        {record.dischargeDate ? "Download Final Invoice" : "Download Provisional Invoice"}
+        <FileText size={16} className="mr-1" />
+        Preview Bill
       </button>
 
       <div
