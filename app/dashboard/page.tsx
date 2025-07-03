@@ -196,7 +196,7 @@ const DashboardPage: React.FC = () => {
   const [patientCache, setPatientCache] = useState<{ [key: string]: PatientInfo }>({})
   const [filters, setFilters] = useState<FilterState>({
     searchQuery: "",
-    filterType: "week",
+    filterType: "today", // Set default to 'today'
     selectedMonth: format(new Date(), "yyyy-MM"),
     startDate: "",
     endDate: "",
@@ -336,321 +336,165 @@ const DashboardPage: React.FC = () => {
 
       const todayDate = getTodayDate()
 
-      // If filtering for today, use real-time listeners
+      // If filtering for today, fetch all today's data once (not listeners)
       if (filters.filterType === "today") {
-        const opdRef = ref(db, `patients/opddetail/${todayDate}`)
-        const ipdInfoRef = ref(db, `patients/ipddetail/userinfoipd/${todayDate}`)
-        const billingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${todayDate}`)
-        const otRef = ref(db, `patients/ot/${todayDate}`)
-
-        // OPD Listeners
-        const opdAdded = onChildAdded(opdRef, async (snapshot) => {
-          const data = snapshot.val()
-          for (const pid in data) {
-            for (const aid in data[pid]) {
-              const ap = data[pid][aid]
-              const info =
-                ap.name && ap.phone
-                  ? { name: ap.name, phone: ap.phone, uhid: pid, age: 0, address: "", gender: "" }
-                  : await fetchPatientInfo(pid)
-              if (info) {
-                setOpdAppointments((prev) => {
-                  if (prev.some((a) => a.id === `${pid}_${aid}`)) return prev // Avoid duplicates
-                  return [
-                    ...prev,
-                    {
-                      id: `${pid}_${aid}`,
-                      patientId: pid,
-                      name: info.name,
-                      phone: info.phone,
-                      date: todayDate,
-                      time: ap.time || "",
-                      appointmentType: ap.appointmentType || "",
-                      createdAt: ap.createdAt,
-                      enteredBy: ap.enteredBy || "",
-                      message: ap.message || "",
-                      modalities: ap.modalities || [],
-                      opdType: ap.opdType || "",
-                      payment: ap.payment || {
-                        cashAmount: 0,
-                        createdAt: "",
-                        discount: 0,
-                        onlineAmount: 0,
-                        paymentMethod: "cash",
-                        totalCharges: 0,
-                        totalPaid: 0,
-                      },
-                      referredBy: ap.referredBy || "",
-                      study: ap.study || "",
-                      visitType: ap.visitType || "",
-                      type: "OPD",
+        try {
+          // OPD
+          const opdSnap = await get(ref(db, `patients/opddetail/${todayDate}`))
+          if (opdSnap.exists()) {
+            const data = opdSnap.val()
+            let opdBytes = JSON.stringify(data).length
+            for (const pid in data) {
+              for (const aid in data[pid]) {
+                const ap = data[pid][aid]
+                const info =
+                  ap.name && ap.phone
+                    ? { name: ap.name, phone: ap.phone, uhid: pid, age: 0, address: "", gender: "" }
+                    : await fetchPatientInfo(pid)
+                if (info) {
+                  tempOpd.push({
+                    id: `${pid}_${aid}`,
+                    patientId: pid,
+                    name: info.name,
+                    phone: info.phone,
+                    date: todayDate,
+                    time: ap.time || "",
+                    appointmentType: ap.appointmentType || "",
+                    createdAt: ap.createdAt,
+                    enteredBy: ap.enteredBy || "",
+                    message: ap.message || "",
+                    modalities: ap.modalities || [],
+                    opdType: ap.opdType || "",
+                    payment: ap.payment || {
+                      cashAmount: 0,
+                      createdAt: "",
+                      discount: 0,
+                      onlineAmount: 0,
+                      paymentMethod: "cash",
+                      totalCharges: 0,
+                      totalPaid: 0,
                     },
-                  ]
-                })
+                    referredBy: ap.referredBy || "",
+                    study: ap.study || "",
+                    visitType: ap.visitType || "",
+                    type: "OPD",
+                  })
+                }
               }
             }
+            setTotalDownloadedBytes((prev) => prev + opdBytes)
           }
-          setTotalDownloadedBytes((prev) => prev + JSON.stringify(data).length)
+
+          // IPD
+          const ipdInfoSnap = await get(ref(db, `patients/ipddetail/userinfoipd/${todayDate}`))
+          const billingSnap = await get(ref(db, `patients/ipddetail/userbillinginfoipd/${todayDate}`))
+          let ipdBytes = 0
+          const billingByPid: Record<string, any> = billingSnap.exists() ? billingSnap.val() : {}
+          if (billingSnap.exists()) ipdBytes += JSON.stringify(billingSnap.val()).length
+          if (ipdInfoSnap.exists()) {
+            const ipdData = ipdInfoSnap.val()
+            ipdBytes += JSON.stringify(ipdData).length
+            for (const pid in ipdData) {
+              for (const ipdid in ipdData[pid]) {
+                const rec = ipdData[pid][ipdid]
+                const info = await fetchPatientInfo(pid)
+                const bill = billingByPid[pid]?.[ipdid] || {}
+
+                const payments: IPDPayment[] = []
+                let netDep = 0
+                let totalRe = 0
+                if (bill.payments) {
+                  Object.values(bill.payments).forEach((p: any) => {
+                    payments.push(p)
+                    if (p.type === "advance") netDep += +p.amount
+                    else {
+                      netDep -= +p.amount
+                      totalRe += +p.amount
+                    }
+                  })
+                }
+                const services: IPDService[] = (bill.services || []).map((s: any) => ({
+                  amount: +s.amount || 0,
+                  serviceName: s.serviceName || "",
+                  type: s.type || "",
+                  doctorName: s.doctorName,
+                  createdAt: s.createdAt,
+                }))
+                const totalSvc = services.reduce((sum, s) => sum + s.amount, 0)
+                const discountAmount = Number(bill.discount) || 0
+                const remaining = totalSvc - discountAmount - netDep
+
+                if (info) {
+                  tempIpd.push({
+                    id: `${pid}_${ipdid}`,
+                    patientId: pid,
+                    uhid: info.uhid,
+                    name: info.name,
+                    phone: info.phone,
+                    admissionDate: todayDate,
+                    admissionTime: rec.admissionTime,
+                    doctor: doctors[rec.doctor]?.name || "Unknown",
+                    doctorId: rec.doctor,
+                    roomType: rec.roomType,
+                    status: rec.status,
+                    services,
+                    totalAmount: totalSvc,
+                    totalDeposit: netDep,
+                    totalRefunds: totalRe,
+                    discount: discountAmount,
+                    payments,
+                    remainingAmount: remaining,
+                    createdAt: rec.createdAt,
+                    type: "IPD",
+                  })
+                }
+              }
+            }
+            setTotalDownloadedBytes((prev) => prev + ipdBytes)
+          }
+
+          // OT
+          const otSnap = await get(ref(db, `patients/ot/${todayDate}`))
+          if (otSnap.exists()) {
+            const otData = otSnap.val()
+            let otBytes = JSON.stringify(otData).length
+            for (const pid in otData) {
+              for (const ipdid in otData[pid]) {
+                const od = otData[pid][ipdid]
+                const info = await fetchPatientInfo(pid)
+                if (info) {
+                  tempOt.push({
+                    id: `${pid}_${ipdid}_${od.createdAt}`,
+                    patientId: pid,
+                    uhid: info.uhid,
+                    name: info.name,
+                    phone: info.phone,
+                    date: od.date || todayDate,
+                    time: od.time || "",
+                    message: od.message || "",
+                    createdAt: od.createdAt,
+                    ipdId: ipdid,
+                    type: "OT",
+                  })
+                }
+              }
+            }
+            setTotalDownloadedBytes((prev) => prev + otBytes)
+          }
+
+          setOpdAppointments(tempOpd)
+          setIpdAppointments(tempIpd)
+          setOtAppointments(tempOt)
+        } catch (err) {
+          console.error("Error fetching today's data:", err)
+          toast.error("Failed to load today's data.")
+          setOpdAppointments([])
+          setIpdAppointments([])
+          setOtAppointments([])
+        } finally {
           setIsLoading(false)
-        })
-        const opdChanged = onChildChanged(opdRef, async (snapshot) => {
-          const data = snapshot.val()
-          for (const pid in data) {
-            for (const aid in data[pid]) {
-              const ap = data[pid][aid]
-              const info =
-                ap.name && ap.phone
-                  ? { name: ap.name, phone: ap.phone, uhid: pid, age: 0, address: "", gender: "" }
-                  : await fetchPatientInfo(pid)
-              if (info) {
-                setOpdAppointments((prev) =>
-                  prev.map((a) =>
-                    a.id === `${pid}_${aid}`
-                      ? {
-                          ...a,
-                          name: info.name,
-                          phone: info.phone,
-                          time: ap.time || "",
-                          appointmentType: ap.appointmentType || "",
-                          modalities: ap.modalities || [],
-                          payment: ap.payment || a.payment,
-                        }
-                      : a,
-                  ),
-                )
-              }
-            }
-          }
-        })
-        const opdRemoved = onChildRemoved(opdRef, (snapshot) => {
-          const data = snapshot.val()
-          for (const pid in data) {
-            for (const aid in data[pid]) {
-              setOpdAppointments((prev) => prev.filter((a) => a.id !== `${pid}_${aid}`))
-            }
-          }
-        })
-
-        // IPD Listeners
-        const ipdAdded = onChildAdded(ipdInfoRef, async (snapshot) => {
-          const data = snapshot.val()
-          for (const pid in data) {
-            for (const ipdid in data[pid]) {
-              const rec = data[pid][ipdid]
-              const info = await fetchPatientInfo(pid)
-              const billingSnap = await get(
-                ref(db, `patients/ipddetail/userbillinginfoipd/${todayDate}/${pid}/${ipdid}`),
-              )
-              const bill = billingSnap.exists() ? billingSnap.val() : {}
-
-              const payments: IPDPayment[] = []
-              let netDep = 0
-              let totalRe = 0
-              if (bill.payments) {
-                Object.values(bill.payments).forEach((p: any) => {
-                  payments.push(p)
-                  if (p.type === "advance") netDep += +p.amount
-                  else {
-                    netDep -= +p.amount
-                    totalRe += +p.amount
-                  }
-                })
-              }
-              const services: IPDService[] = (bill.services || []).map((s: any) => ({
-                amount: +s.amount || 0,
-                serviceName: s.serviceName || "",
-                type: s.type || "",
-                doctorName: s.doctorName,
-                createdAt: s.createdAt,
-              }))
-              const totalSvc = services.reduce((sum, s) => sum + s.amount, 0)
-              const discountAmount = Number(bill.discount) || 0
-              const remaining = totalSvc - discountAmount - netDep
-
-              if (info) {
-                setIpdAppointments((prev) => {
-                  if (prev.some((a) => a.id === `${pid}_${ipdid}`)) return prev
-                  return [
-                    ...prev,
-                    {
-                      id: `${pid}_${ipdid}`,
-                      patientId: pid,
-                      uhid: info.uhid,
-                      name: info.name,
-                      phone: info.phone,
-                      admissionDate: todayDate,
-                      admissionTime: rec.admissionTime,
-                      doctor: doctors[rec.doctor]?.name || "Unknown",
-                      doctorId: rec.doctor,
-                      roomType: rec.roomType,
-                      status: rec.status,
-                      services,
-                      totalAmount: totalSvc,
-                      totalDeposit: netDep,
-                      totalRefunds: totalRe,
-                      discount: discountAmount,
-                      payments,
-                      remainingAmount: remaining,
-                      createdAt: rec.createdAt,
-                      type: "IPD",
-                    },
-                  ]
-                })
-              }
-            }
-          }
-          setTotalDownloadedBytes((prev) => prev + JSON.stringify(data).length)
-          setIsLoading(false)
-        })
-        const ipdChanged = onChildChanged(ipdInfoRef, async (snapshot) => {
-          const data = snapshot.val()
-          for (const pid in data) {
-            for (const ipdid in data[pid]) {
-              const rec = data[pid][ipdid]
-              const info = await fetchPatientInfo(pid)
-              const billingSnap = await get(
-                ref(db, `patients/ipddetail/userbillinginfoipd/${todayDate}/${pid}/${ipdid}`),
-              )
-              const bill = billingSnap.exists() ? billingSnap.val() : {}
-
-              const payments: IPDPayment[] = []
-              let netDep = 0
-              let totalRe = 0
-              if (bill.payments) {
-                Object.values(bill.payments).forEach((p: any) => {
-                  payments.push(p)
-                  if (p.type === "advance") netDep += +p.amount
-                  else {
-                    netDep -= +p.amount
-                    totalRe += +p.amount
-                  }
-                })
-              }
-              const services: IPDService[] = (bill.services || []).map((s: any) => ({
-                amount: +s.amount || 0,
-                serviceName: s.serviceName || "",
-                type: s.type || "",
-                doctorName: s.doctorName,
-                createdAt: s.createdAt,
-              }))
-              const totalSvc = services.reduce((sum, s) => sum + s.amount, 0)
-              const discountAmount = Number(bill.discount) || 0
-              const remaining = totalSvc - discountAmount - netDep
-
-              if (info) {
-                setIpdAppointments((prev) =>
-                  prev.map((a) =>
-                    a.id === `${pid}_${ipdid}`
-                      ? {
-                          ...a,
-                          name: info.name,
-                          phone: info.phone,
-                          admissionTime: rec.admissionTime,
-                          doctor: doctors[rec.doctor]?.name || "Unknown",
-                          roomType: rec.roomType,
-                          status: rec.status,
-                          services,
-                          totalAmount: totalSvc,
-                          totalDeposit: netDep,
-                          totalRefunds: totalRe,
-                          discount: discountAmount,
-                          payments,
-                          remainingAmount: remaining,
-                        }
-                      : a,
-                  ),
-                )
-              }
-            }
-          }
-        })
-        const ipdRemoved = onChildRemoved(ipdInfoRef, (snapshot) => {
-          const data = snapshot.val()
-          for (const pid in data) {
-            for (const ipdid in data[pid]) {
-              setIpdAppointments((prev) => prev.filter((a) => a.id !== `${pid}_${ipdid}`))
-            }
-          }
-        })
-
-        // OT Listeners
-        const otAdded = onChildAdded(otRef, async (snapshot) => {
-          const data = snapshot.val()
-          for (const pid in data) {
-            for (const ipdid in data[pid]) {
-              const od = data[pid][ipdid]
-              const info = await fetchPatientInfo(pid)
-              if (info) {
-                setOtAppointments((prev) => {
-                  if (prev.some((a) => a.id === `${pid}_${ipdid}_${od.createdAt}`)) return prev
-                  return [
-                    ...prev,
-                    {
-                      id: `${pid}_${ipdid}_${od.createdAt}`,
-                      patientId: pid,
-                      uhid: info.uhid,
-                      name: info.name,
-                      phone: info.phone,
-                      date: od.date || todayDate,
-                      time: od.time || "",
-                      message: od.message || "",
-                      createdAt: od.createdAt,
-                      ipdId: ipdid,
-                      type: "OT",
-                    },
-                  ]
-                })
-              }
-            }
-          }
-          setTotalDownloadedBytes((prev) => prev + JSON.stringify(data).length)
-          setIsLoading(false)
-        })
-        const otChanged = onChildChanged(otRef, async (snapshot) => {
-          const data = snapshot.val()
-          for (const pid in data) {
-            for (const ipdid in data[pid]) {
-              const od = data[pid][ipdid]
-              const info = await fetchPatientInfo(pid)
-              if (info) {
-                setOtAppointments((prev) =>
-                  prev.map((a) =>
-                    a.id === `${pid}_${ipdid}_${od.createdAt}`
-                      ? {
-                          ...a,
-                          name: info.name,
-                          phone: info.phone,
-                          date: od.date || todayDate,
-                          time: od.time || "",
-                          message: od.message || "",
-                        }
-                      : a,
-                  ),
-                )
-              }
-            }
-          }
-        })
-        const otRemoved = onChildRemoved(otRef, (snapshot) => {
-          const data = snapshot.val()
-          for (const pid in data) {
-            for (const ipdid in data[pid]) {
-              setOtAppointments((prev) => prev.filter((a) => a.id !== `${pid}_${ipdid}_${data[pid][ipdid].createdAt}`))
-            }
-          }
-        })
-
-        return () => {
-          opdAdded()
-          opdChanged()
-          opdRemoved()
-          ipdAdded()
-          ipdChanged()
-          ipdRemoved()
-          otAdded()
-          otChanged()
-          otRemoved()
         }
+        return
       } else {
         // For historical ranges, fetch data once
         const tasks: Promise<void>[] = []
@@ -956,7 +800,36 @@ const DashboardPage: React.FC = () => {
     }
   }
 
-  const handleFilterChange = (upd: Partial<FilterState>) => setFilters((p) => ({ ...p, ...upd }))
+  // Fix: Always set filterType to 'today' and clear custom dates when clicking Today quick filter
+  const handleFilterChange = (upd: Partial<FilterState>) => {
+    if (upd.filterType === "today") {
+      setFilters((p) => ({
+        ...p,
+        filterType: "today",
+        startDate: "",
+        endDate: "",
+        selectedMonth: format(new Date(), "yyyy-MM"),
+      }))
+    } else if (upd.filterType === "week") {
+      setFilters((p) => ({
+        ...p,
+        filterType: "week",
+        startDate: "",
+        endDate: "",
+        selectedMonth: format(new Date(), "yyyy-MM"),
+      }))
+    } else if (upd.filterType === "month") {
+      setFilters((p) => ({
+        ...p,
+        filterType: "month",
+        startDate: "",
+        endDate: "",
+        selectedMonth: upd.selectedMonth || format(new Date(), "yyyy-MM"),
+      }))
+    } else {
+      setFilters((p) => ({ ...p, ...upd }))
+    }
+  }
 
   const resetFilters = () =>
     setFilters({
@@ -1231,7 +1104,7 @@ const DashboardPage: React.FC = () => {
                   <Activity className="text-white h-6 w-6" />
                 </div>
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-sky-600 to-blue-600 bg-clip-text text-transparent">
-                  MEDFORD HOSPITAL
+                 G-MEDFORD-NX HOSPITAL
                 </h1>
               </div>
               <div className="relative w-full md:w-1/3">
