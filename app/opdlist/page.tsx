@@ -622,7 +622,7 @@ export default function ManageOPDPage() {
                     )}
                   </div>
                   <span className="text-xs text-gray-500">
-                    Enter fewer than 10 characters for today's appointments, 10 or more for full search
+                    Enter fewer than 10 characters for todays appointments, 10 or more for full search
                   </span>
                 </div>
                 <div className="flex flex-col gap-1">
@@ -645,7 +645,7 @@ export default function ManageOPDPage() {
                     )}
                   </div>
                   <span className="text-xs text-gray-500">
-                    Type 10-digit number to search all appointments, fewer for today's appointments
+                    Type 10-digit number to search all appointments, fewer for todays appointments
                   </span>
                 </div>
                 <span className="text-xs text-gray-500">
