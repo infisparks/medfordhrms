@@ -497,13 +497,9 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
         ref={invoiceRef}
         style={{
           position: "absolute",
-
           left: "-9999px",
-
           top: 0,
-
           width: "520px",
-
           backgroundColor: "transparent",
         }}
       >
@@ -511,9 +507,11 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
           {/* Header */}
 
           <div className="flex justify-between mb-2">
-            <div>
+            {/* Removed space-y-[1px] for minimal spacing */}
+            <div className="flex flex-col"> 
+              {/* Adjusted Patient Name and UHID */}
               <p>
-                <strong>Patient Name:</strong> {record.name}
+                <strong>Patient Name:</strong> {record.name} ({record.uhid})
               </p>
 
               <p>
@@ -522,10 +520,6 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
 
               <p>
                 <strong>Address:</strong> {record.address || "Not provided"}
-              </p>
-
-              <p>
-                <strong>UHID:</strong> {record.uhid}
               </p>
 
               <p>
@@ -540,7 +534,8 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
               </p>
             </div>
 
-            <div className="text-right">
+            {/* Removed space-y-[1px] for minimal spacing */}
+            <div className="text-right flex flex-col">
               <p>
                 <strong>Admit Date:</strong>{" "}
                 {record.admitDate ? (
@@ -582,26 +577,26 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
               <table className="w-full text-[7px] max-w-[520px]">
                 <thead>
                   <tr className="bg-blue-100">
-                    <th className="p-1 text-left min-w-[70px]">Doctor Name</th>
+                    <th className="py-0.5 px-1 text-left min-w-[70px]">Doctor Name</th>
 
-                    <th className="p-1 text-center w-[25px]">Visited</th>
+                    <th className="py-0.5 px-1 text-center w-[25px]">Visited</th>
 
-                    <th className="p-1 text-right w-[40px]">Unit (Rs)</th>
+                    <th className="py-0.5 px-1 text-right w-[40px]">Unit (Rs)</th>
 
-                    <th className="p-1 text-right w-[50px]">Total (Rs)</th>
+                    <th className="py-0.5 px-1 text-right w-[50px]">Total (Rs)</th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {groupedConsultantServices.map((item, idx) => (
                     <tr key={idx}>
-                      <td className="p-1">{item.doctorName}</td>
+                      <td className="py-0.5 px-1">{item.doctorName}</td>
 
-                      <td className="p-1 text-center">{item.quantity}</td>
+                      <td className="py-0.5 px-1 text-center">{item.quantity}</td>
 
-                      <td className="p-1 text-right">{item.unitAmount.toLocaleString()}</td>
+                      <td className="py-0.5 px-1 text-right">{item.unitAmount.toLocaleString()}</td>
 
-                      <td className="p-1 text-right">{item.totalAmount.toLocaleString()}</td>
+                      <td className="py-0.5 px-1 text-right">{item.totalAmount.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -621,26 +616,26 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
             <table className="w-full text-[7px] max-w-[520px]">
               <thead>
                 <tr className="bg-blue-100">
-                  <th className="p-1 text-left min-w-[100px]">Service</th>
+                  <th className="py-1 px-1 text-left min-w-[100px]">Service</th>
 
-                  <th className="p-1 text-center w-[25px]">Qnty</th>
+                  <th className="py-1 px-1 text-center w-[25px]">Qnty</th>
 
-                  <th className="p-1 text-right w-[40px]">Unit (Rs)</th>
+                  <th className="py-1 px-1 text-right w-[40px]">Unit (Rs)</th>
 
-                  <th className="p-1 text-right w-[50px]">Total (Rs)</th>
+                  <th className="py-1 px-1 text-right w-[50px]">Total (Rs)</th>
                 </tr>
               </thead>
 
               <tbody>
                 {groupedHospitalServices.map((item, idx) => (
                   <tr key={idx}>
-                    <td className="p-1">{item.serviceName}</td>
+                    <td className="py-0 px-1">{item.serviceName}</td>
 
-                    <td className="p-1 text-center">{item.quantity}</td>
+                    <td className="py-0 px-1 text-center">{item.quantity}</td>
 
-                    <td className="p-1 text-right">{item.unitAmount.toLocaleString()}</td>
+                    <td className="py-0 px-1 text-right">{item.unitAmount.toLocaleString()}</td>
 
-                    <td className="p-1 text-right">{item.totalAmount.toLocaleString()}</td>
+                    <td className="py-0 px-1 text-right">{item.totalAmount.toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>

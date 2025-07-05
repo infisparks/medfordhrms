@@ -1,5 +1,4 @@
 "use client"
-
 import React, { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { ref, onValue, update, push, remove, get } from "firebase/database"
@@ -29,7 +28,6 @@ import {
   Bed,
   Users,
   FileText,
-  Download,
   ChevronRight,
   Percent,
   UserPlus,
@@ -40,6 +38,7 @@ import {
   RefreshCw,
   Search,
   Clock,
+  Clipboard,
 } from "lucide-react"
 import { format, parseISO } from "date-fns"
 import { Dialog, Transition } from "@headlessui/react"
@@ -47,7 +46,6 @@ import InvoiceDownload from "../../../InvoiceDownload"
 import BulkServiceModal from "./bulk-service-modal"
 
 // ===== Interfaces =====
-
 interface ServiceItem {
   serviceName: string
   doctorName?: string
@@ -55,7 +53,6 @@ interface ServiceItem {
   amount: number
   createdAt?: string
 }
-
 interface Payment {
   id?: string
   amount: number
@@ -63,13 +60,11 @@ interface Payment {
   type: "advance" | "refund"
   date: string
 }
-
 interface AdditionalServiceForm {
   serviceName: string
   amount: number
   quantity: number
 }
-
 interface PaymentForm {
   paymentAmount: number
   paymentType: string
@@ -77,11 +72,9 @@ interface PaymentForm {
   sendWhatsappNotification: boolean
   paymentDate: string
 }
-
 interface DiscountForm {
   discount: number
 }
-
 interface DoctorVisitForm {
   doctorId?: string
   visitCharge: number
@@ -89,7 +82,6 @@ interface DoctorVisitForm {
   customDoctorName?: string
   isCustomDoctor: boolean
 }
-
 export interface BillingRecord {
   patientId: string
   uhid: string
@@ -115,14 +107,12 @@ export interface BillingRecord {
   createdAt?: string
   doctor?: string
 }
-
 interface ParsedServiceItem {
   id: string
   serviceName: string
   quantity: number
   amount: number
 }
-
 interface IDoctor {
   id: string
   name: string
@@ -133,7 +123,6 @@ interface IDoctor {
 }
 
 // ===== Validation Schemas =====
-
 const additionalServiceSchema = yup
   .object({
     serviceName: yup.string().required("Service Name is required"),
@@ -144,13 +133,12 @@ const additionalServiceSchema = yup
       .required("Amount is required"),
     quantity: yup
       .number()
-      .typeError("Quantity must be a number")
+      .typeError("Quantity must be an integer")
       .integer("Quantity must be an integer")
       .min(1, "Quantity must be at least 1")
       .required("Quantity is required"),
   })
   .required()
-
 const paymentSchema = yup
   .object({
     paymentAmount: yup
@@ -164,7 +152,6 @@ const paymentSchema = yup
     paymentDate: yup.string().required("Payment Date is required"),
   })
   .required()
-
 const discountSchema = yup
   .object({
     discount: yup
@@ -174,7 +161,6 @@ const discountSchema = yup
       .required("Discount is required"),
   })
   .required()
-
 const doctorVisitSchema = yup
   .object({
     doctorId: yup.string().when("isCustomDoctor", {
@@ -232,7 +218,6 @@ export default function BillingPage() {
     resolver: yupResolver(additionalServiceSchema),
     defaultValues: { serviceName: "", amount: 0, quantity: 1 },
   })
-
   const {
     register: registerPayment,
     handleSubmit: handleSubmitPayment,
@@ -250,7 +235,6 @@ export default function BillingPage() {
       paymentDate: new Date().toISOString().slice(0, 10),
     },
   })
-
   const {
     register: registerDiscount,
     handleSubmit: handleSubmitDiscount,
@@ -261,7 +245,6 @@ export default function BillingPage() {
     resolver: yupResolver(discountSchema),
     defaultValues: { discount: 0 },
   })
-
   const {
     register: registerVisit,
     handleSubmit: handleSubmitVisit,
@@ -349,8 +332,12 @@ export default function BillingPage() {
     const infoPath = `patients/ipddetail/userinfoipd/${admitDateKey}/${patientId}/${ipdId}`
     const patientInfoPath = `patients/patientinfo/${patientId}`
 
-    let billingData: any = null, infoData: any = null, patientInfoData: any = null
-    let billingLoaded = false, infoLoaded = false, patientInfoLoaded = false
+    let billingData: any = null,
+      infoData: any = null,
+      patientInfoData: any = null
+    let billingLoaded = false,
+      infoLoaded = false,
+      patientInfoLoaded = false
 
     const checkAndSet = () => {
       if (billingLoaded && infoLoaded && patientInfoLoaded) {
@@ -396,7 +383,6 @@ export default function BillingPage() {
                 createdAt: svc.createdAt || "",
               }))
             : []
-
           const paymentsArray: Payment[] = billingData.payments
             ? Object.keys(billingData.payments).map((k) => ({
                 id: k,
@@ -406,7 +392,6 @@ export default function BillingPage() {
                 date: billingData.payments[k].date || new Date().toISOString(),
               }))
             : []
-
           const depositTotal = Number(billingData.totalDeposit) || 0
 
           setSelectedRecord({
@@ -421,22 +406,35 @@ export default function BillingPage() {
           toast.info("No billing record found. Showing patient details only.")
           setSelectedRecord(base)
         }
-
         setLoading(false)
       }
     }
 
-    const unsubBilling = onValue(ref(db, billingPath), (snap) => {
-      billingData = snap.val()
-      billingLoaded = true
-      checkAndSet()
-    }, () => { billingLoaded = true; checkAndSet() })
+    const unsubBilling = onValue(
+      ref(db, billingPath),
+      (snap) => {
+        billingData = snap.val()
+        billingLoaded = true
+        checkAndSet()
+      },
+      () => {
+        billingLoaded = true
+        checkAndSet()
+      },
+    )
 
-    const unsubInfo = onValue(ref(db, infoPath), (snap) => {
-      infoData = snap.val()
-      infoLoaded = true
-      checkAndSet()
-    }, () => { infoLoaded = true; checkAndSet() })
+    const unsubInfo = onValue(
+      ref(db, infoPath),
+      (snap) => {
+        infoData = snap.val()
+        infoLoaded = true
+        checkAndSet()
+      },
+      () => {
+        infoLoaded = true
+        checkAndSet()
+      },
+    )
 
     get(ref(db, patientInfoPath))
       .then((snap) => {
@@ -462,6 +460,7 @@ export default function BillingPage() {
     if (watchIsCustomDoctor || !watchSelectedDoctorId || !selectedRecord) return
     const doc = doctors.find((d) => d.id === watchSelectedDoctorId)
     if (!doc) return
+
     let amount = 0
     if (doc.department === "OPD") {
       amount = doc.opdCharge ?? 0
@@ -499,10 +498,11 @@ export default function BillingPage() {
 
   const serviceItems = selectedRecord?.services.filter((s) => s.type === "service") || []
   const groupedServiceItems = getGroupedServices(serviceItems)
-
   const hospitalServiceTotal = serviceItems.reduce((sum, s) => sum + s.amount, 0)
+
   const consultantChargeItems = selectedRecord?.services.filter((s) => s.type === "doctorvisit") || []
   const consultantChargeTotal = consultantChargeItems.reduce((sum, s) => sum + s.amount, 0)
+
   const discountVal = selectedRecord?.discount || 0
   const totalBill = hospitalServiceTotal + consultantChargeTotal - discountVal
   const totalRefunds = selectedRecord
@@ -515,20 +515,32 @@ export default function BillingPage() {
       : "0.0"
 
   // Aggregate consultant charges
-  const aggregatedConsultantCharges = consultantChargeItems.reduce((acc, item) => {
-    const key = item.doctorName || "Unknown"
-    if (!acc[key]) {
-      acc[key] = { doctorName: key, visited: 0, totalCharge: 0, lastVisit: null as Date | null, items: [] as ServiceItem[] }
-    }
-    acc[key].visited += 1
-    acc[key].totalCharge += item.amount
-    const itemDate = item.createdAt ? new Date(item.createdAt) : new Date(0)
-    if (!acc[key].lastVisit || itemDate > acc[key].lastVisit) {
-      acc[key].lastVisit = itemDate
-    }
-    acc[key].items.push(item)
-    return acc
-  }, {} as Record<string, { doctorName: string; visited: number; totalCharge: number; lastVisit: Date | null; items: ServiceItem[] }>)
+  const aggregatedConsultantCharges = consultantChargeItems.reduce(
+    (acc, item) => {
+      const key = item.doctorName || "Unknown"
+      if (!acc[key]) {
+        acc[key] = {
+          doctorName: key,
+          visited: 0,
+          totalCharge: 0,
+          lastVisit: null as Date | null,
+          items: [] as ServiceItem[],
+        }
+      }
+      acc[key].visited += 1
+      acc[key].totalCharge += item.amount
+      const itemDate = item.createdAt ? new Date(item.createdAt) : new Date(0)
+      if (!acc[key].lastVisit || itemDate > acc[key].lastVisit) {
+        acc[key].lastVisit = itemDate
+      }
+      acc[key].items.push(item)
+      return acc
+    },
+    {} as Record<
+      string,
+      { doctorName: string; visited: number; totalCharge: number; lastVisit: Date | null; items: ServiceItem[] }
+    >,
+  )
   const aggregatedConsultantChargesArray = Object.values(aggregatedConsultantCharges)
 
   // Payment notification
@@ -588,7 +600,10 @@ export default function BillingPage() {
         amount: svc.amount,
         createdAt: svc.createdAt,
       }))
-      const recordRef = ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}`)
+      const recordRef = ref(
+        db,
+        `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}`,
+      )
       await update(recordRef, { services: updated })
       toast.success(`Additional service${data.quantity > 1 ? "s" : ""} added successfully!`)
       setSelectedRecord({ ...selectedRecord, services: updated })
@@ -632,7 +647,7 @@ export default function BillingPage() {
       }))
       await update(
         ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}`),
-        { services: updated }
+        { services: updated },
       )
       setSelectedRecord({ ...selectedRecord, services: updated })
     } catch (error) {
@@ -655,9 +670,23 @@ export default function BillingPage() {
     try {
       const now = new Date()
       const [year, month, day] = formData.paymentDate.split("-").map(Number)
-      const combined = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds())
+      const combined = new Date(
+        year,
+        month - 1,
+        day,
+        now.getHours(),
+        now.getMinutes(),
+        now.getSeconds(),
+        now.getMilliseconds(),
+      )
       const isoDate = combined.toISOString()
-      const newRef = push(ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments`))
+
+      const newRef = push(
+        ref(
+          db,
+          `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments`,
+        ),
+      )
       const newPayment: Payment = {
         amount: Number(formData.paymentAmount),
         paymentType: formData.paymentType,
@@ -666,13 +695,26 @@ export default function BillingPage() {
         id: newRef.key!,
       }
       await update(newRef, newPayment)
+
       let updatedDeposit = selectedRecord.amount
       if (newPayment.type === "advance") updatedDeposit += newPayment.amount
       if (newPayment.type === "refund") updatedDeposit -= newPayment.amount
-      await update(ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}`), { totalDeposit: updatedDeposit })
+
+      await update(
+        ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}`),
+        { totalDeposit: updatedDeposit },
+      )
+
       if (formData.sendWhatsappNotification) {
-        await sendPaymentNotification(selectedRecord.mobileNumber, selectedRecord.name, newPayment.amount, updatedDeposit, newPayment.type)
+        await sendPaymentNotification(
+          selectedRecord.mobileNumber,
+          selectedRecord.name,
+          newPayment.amount,
+          updatedDeposit,
+          newPayment.type,
+        )
       }
+
       toast.success("Payment recorded successfully!")
       setSelectedRecord({
         ...selectedRecord,
@@ -713,7 +755,7 @@ export default function BillingPage() {
       const discountVal = Number(formData.discount)
       await update(
         ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}`),
-        { discount: discountVal }
+        { discount: discountVal },
       )
       toast.success("Discount applied successfully!")
       setSelectedRecord({ ...selectedRecord, discount: discountVal })
@@ -740,6 +782,7 @@ export default function BillingPage() {
       const doctorName = data.isCustomDoctor
         ? data.customDoctorName || "Custom Doctor"
         : doctors.find((d) => d.id === data.doctorId)?.name || "Unknown"
+
       const old = [...selectedRecord.services]
       const newItems: ServiceItem[] = []
       for (let i = 0; i < data.visitTimes; i++) {
@@ -751,6 +794,7 @@ export default function BillingPage() {
           createdAt: new Date().toLocaleString(),
         })
       }
+
       const updated = [...newItems, ...old].map((svc) => ({
         serviceName: svc.serviceName,
         doctorName: svc.doctorName,
@@ -758,12 +802,13 @@ export default function BillingPage() {
         amount: svc.amount,
         createdAt: svc.createdAt,
       }))
+
       await update(
         ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}`),
-        { services: updated }
+        { services: updated },
       )
       toast.success(
-        `Consultant charge${data.visitTimes > 1 ? "s" : ""} added successfully! (${data.visitTimes} visit${data.visitTimes > 1 ? "s" : ""})`
+        `Consultant charge${data.visitTimes > 1 ? "s" : ""} added successfully! (${data.visitTimes} visit${data.visitTimes > 1 ? "s" : ""})`,
       )
       setSelectedRecord({ ...selectedRecord, services: updated })
       resetVisit({ doctorId: "", visitCharge: 0, visitTimes: 1, customDoctorName: "", isCustomDoctor: false })
@@ -786,11 +831,11 @@ export default function BillingPage() {
     }
     try {
       const updated = selectedRecord.services.filter(
-        (svc) => !(svc.serviceName === serviceName && svc.amount === amount && svc.type === "service")
+        (svc) => !(svc.serviceName === serviceName && svc.amount === amount && svc.type === "service"),
       )
       await update(
         ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}`),
-        { services: updated }
+        { services: updated },
       )
       toast.success(`All instances of '${serviceName}' deleted successfully!`)
       setSelectedRecord({ ...selectedRecord, services: updated })
@@ -813,15 +858,21 @@ export default function BillingPage() {
     }
     try {
       await remove(
-        ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments/${paymentId}`)
+        ref(
+          db,
+          `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments/${paymentId}`,
+        ),
       )
+
       let updatedDeposit = selectedRecord.amount
       if (paymentType === "advance") updatedDeposit -= paymentAmount
       if (paymentType === "refund") updatedDeposit += paymentAmount
+
       await update(
         ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}`),
-        { totalDeposit: updatedDeposit }
+        { totalDeposit: updatedDeposit },
       )
+
       toast.success("Payment deleted successfully!")
       setSelectedRecord({
         ...selectedRecord,
@@ -847,11 +898,11 @@ export default function BillingPage() {
     }
     try {
       const updated = selectedRecord.services.filter(
-        (svc) => svc.type !== "doctorvisit" || svc.doctorName !== doctorName
+        (svc) => svc.type !== "doctorvisit" || svc.doctorName !== doctorName,
       )
       await update(
         ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}`),
-        { services: updated }
+        { services: updated },
       )
       toast.success(`Consultant charges for Dr. ${doctorName} deleted successfully!`)
       setSelectedRecord({ ...selectedRecord, services: updated })
@@ -864,10 +915,75 @@ export default function BillingPage() {
   }
 
   const doctorOptions = doctors.map((doc) => ({ value: doc.id, label: `${doc.name} (${doc.specialist})` }))
+
   let primaryDoctorName = "N/A"
   if (selectedRecord?.doctor) {
     const found = doctors.find((d) => d.id === selectedRecord.doctor)
     if (found) primaryDoctorName = found.name
+  }
+
+  const handleCopyDetails = async () => {
+    if (!selectedRecord) {
+      toast.error("No patient record selected to copy details.")
+      return
+    }
+
+    try {
+      // 1. Date of Admission (dd-mm-yyyy)
+      const admissionDate = selectedRecord.admitDate ? format(parseISO(selectedRecord.admitDate), "dd-MM-yyyy") : "N/A"
+
+      // 2. Discharge Date (dd-mm-yyyy) or blank
+      const dischargeDate = selectedRecord.dischargeDate
+        ? format(parseISO(selectedRecord.dischargeDate), "dd-MM-yyyy")
+        : ""
+
+      // 3. UHID
+      const uhid = selectedRecord.uhid || "N/A"
+
+      // 4. Leave blank
+      const blankColumn = ""
+
+      // 5. Patient Name
+      const patientName = selectedRecord.name || "N/A"
+
+      // 6. User Age and Gender (e.g., 50/M or 39/F)
+      const age = selectedRecord.age || "N/A"
+      const genderInitial = selectedRecord.gender?.charAt(0).toUpperCase() || "N/A"
+      const ageGender = `${age}/${genderInitial}`
+
+      // 7. Contact Number of Patient
+      const contactNumber = selectedRecord.mobileNumber || "N/A"
+
+      // 8. Room Name
+      let roomName = "N/A"
+      if (selectedRecord.roomType) {
+        roomName = selectedRecord.roomType
+        if (selectedRecord.bed && beds[selectedRecord.roomType]?.[selectedRecord.bed]?.bedNumber) {
+          roomName += ` (${beds[selectedRecord.roomType][selectedRecord.bed].bedNumber})`
+        }
+      }
+
+      // 9. Doctor Name
+      const doctorName = primaryDoctorName
+
+      const detailsToCopy = [
+        admissionDate,
+        dischargeDate,
+        uhid,
+        blankColumn,
+        patientName,
+        ageGender,
+        contactNumber,
+        roomName,
+        doctorName,
+      ].join("\t") // Tab-separated for Excel
+
+      await navigator.clipboard.writeText(detailsToCopy)
+      toast.success("Patient details copied to clipboard!")
+    } catch (error) {
+      console.error("Failed to copy details:", error)
+      toast.error("Failed to copy details. Please try again.")
+    }
   }
 
   return (
@@ -894,6 +1010,13 @@ export default function BillingPage() {
                 </button>
               )}
               <button
+                onClick={handleCopyDetails} // New button for copying details
+                disabled={loading || !selectedRecord}
+                className="flex items-center px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors shadow-sm"
+              >
+                <Clipboard size={16} className="mr-2" /> Copy Details
+              </button>
+              <button
                 onClick={() => setIsPaymentHistoryOpen(true)}
                 className="flex items-center px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
               >
@@ -903,7 +1026,6 @@ export default function BillingPage() {
           </div>
         </div>
       </header>
-
       {/* MAIN */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {selectedRecord ? (
@@ -1017,7 +1139,6 @@ export default function BillingPage() {
                         {discountVal > 0 ? "Update Discount" : "Add Discount"}
                       </button>
                     </div>
-
                     {/* Patient Details */}
                     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
                       <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center">
@@ -1052,7 +1173,6 @@ export default function BillingPage() {
                         </div>
                       </div>
                     </div>
-
                     {/* Relative Details */}
                     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
                       <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center">
@@ -1073,14 +1193,16 @@ export default function BillingPage() {
                         </div>
                       </div>
                     </div>
-
                     {/* Quick Actions */}
                     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
                       <h3 className="text-lg font-semibold text-gray-800 mb-3">Quick Actions</h3>
                       <div className="space-y-3">
                         {/* Preview Bill */}
                         <InvoiceDownload record={selectedRecord} beds={beds} doctors={doctors}>
-                          <button type="button" className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+                          <button
+                            type="button"
+                            className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                          >
                             <FileText size={16} className="mr-2" /> Preview Bill
                           </button>
                         </InvoiceDownload>
@@ -1101,7 +1223,6 @@ export default function BillingPage() {
                   </div>
                 </div>
               </div>
-
               {/* TABS */}
               <div className="mb-6">
                 <div className="border-b border-gray-200">
@@ -1109,7 +1230,9 @@ export default function BillingPage() {
                     <button
                       onClick={() => setActiveTab("overview")}
                       className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
-                        activeTab === "overview" ? "border-teal-500 text-teal-600" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                        activeTab === "overview"
+                          ? "border-teal-500 text-teal-600"
+                          : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                       }`}
                     >
                       <FileText size={16} className="mr-2" /> Overview
@@ -1117,7 +1240,9 @@ export default function BillingPage() {
                     <button
                       onClick={() => setActiveTab("services")}
                       className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
-                        activeTab === "services" ? "border-teal-500 text-teal-600" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                        activeTab === "services"
+                          ? "border-teal-500 text-teal-600"
+                          : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                       }`}
                     >
                       <Plus size={16} className="mr-2" /> Services
@@ -1125,7 +1250,9 @@ export default function BillingPage() {
                     <button
                       onClick={() => setActiveTab("payments")}
                       className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
-                        activeTab === "payments" ? "border-teal-500 text-teal-600" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                        activeTab === "payments"
+                          ? "border-teal-500 text-teal-600"
+                          : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                       }`}
                     >
                       <CreditCard size={16} className="mr-2" /> Payments
@@ -1133,7 +1260,9 @@ export default function BillingPage() {
                     <button
                       onClick={() => setActiveTab("consultants")}
                       className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
-                        activeTab === "consultants" ? "border-teal-500 text-teal-600" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                        activeTab === "consultants"
+                          ? "border-teal-500 text-teal-600"
+                          : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                       }`}
                     >
                       <UserPlus size={16} className="mr-2" /> Consultants
@@ -1141,7 +1270,6 @@ export default function BillingPage() {
                   </nav>
                 </div>
               </div>
-
               {/* TAB CONTENT */}
               <div className="bg-white rounded-2xl shadow-md overflow-hidden">
                 {/* Overview Tab */}
@@ -1194,7 +1322,9 @@ export default function BillingPage() {
                                 <tr className="bg-gray-50">
                                   <td className="px-4 py-3 text-sm font-medium">Total</td>
                                   <td></td>
-                                  <td className="px-4 py-3 text-sm font-bold text-right">₹{hospitalServiceTotal.toLocaleString()}</td>
+                                  <td className="px-4 py-3 text-sm font-bold text-right">
+                                    ₹{hospitalServiceTotal.toLocaleString()}
+                                  </td>
                                   <td></td>
                                 </tr>
                               </tfoot>
@@ -1213,7 +1343,6 @@ export default function BillingPage() {
                           </div>
                         )}
                       </div>
-
                       {/* Consultant Charges Summary */}
                       <div>
                         <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
@@ -1274,7 +1403,6 @@ export default function BillingPage() {
                     </div>
                   </div>
                 )}
-
                 {/* Services Tab */}
                 {activeTab === "services" && (
                   <div className="p-6">
@@ -1344,7 +1472,6 @@ export default function BillingPage() {
                           </div>
                         )}
                       </div>
-
                       {/* Add Service Form */}
                       <div className="lg:col-span-1">
                         <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -1357,13 +1484,12 @@ export default function BillingPage() {
                                 name="serviceName"
                                 render={({ field }) => {
                                   const valueStr = field.value || ""
-                                  const selectedOption =
-                                    serviceOptions.find(
-                                      (opt) =>
-                                        typeof opt.label === "string" &&
-                                        typeof valueStr === "string" &&
-                                        opt.label.toLowerCase() === valueStr.toLowerCase()
-                                    ) || { label: valueStr, value: valueStr }
+                                  const selectedOption = serviceOptions.find(
+                                    (opt) =>
+                                      typeof opt.label === "string" &&
+                                      typeof valueStr === "string" &&
+                                      opt.label.toLowerCase() === valueStr.toLowerCase(),
+                                  ) || { label: valueStr, value: valueStr }
                                   return (
                                     <CreatableSelect
                                       {...field}
@@ -1425,11 +1551,16 @@ export default function BillingPage() {
                                 loading ? "opacity-50 cursor-not-allowed" : ""
                               }`}
                             >
-                              {loading ? "Processing..." : <><Plus size={16} className="mr-2" /> Add Service</>}
+                              {loading ? (
+                                "Processing..."
+                              ) : (
+                                <>
+                                  <Plus size={16} className="mr-2" /> Add Service
+                                </>
+                              )}
                             </button>
                           </form>
                         </div>
-
                         {/* Enhanced Discount Card */}
                         <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg border border-emerald-200 p-6 mt-6 shadow-sm">
                           <h3 className="text-lg font-semibold text-emerald-800 mb-4 flex items-center">
@@ -1476,7 +1607,6 @@ export default function BillingPage() {
                     </div>
                   </div>
                 )}
-
                 {/* Payments Tab */}
                 {activeTab === "payments" && (
                   <div className="p-6">
@@ -1526,15 +1656,21 @@ export default function BillingPage() {
                             <table className="w-full">
                               <thead className="bg-gray-50">
                                 <tr>
-                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    #
+                                  </th>
                                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Amount (₹)
                                   </th>
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Payment Type
                                   </th>
-                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Type
+                                  </th>
+                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Date
+                                  </th>
                                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Action
                                   </th>
@@ -1572,7 +1708,6 @@ export default function BillingPage() {
                           </div>
                         )}
                       </div>
-
                       {/* Record Payment Form */}
                       <div className="lg:col-span-1">
                         <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -1657,7 +1792,9 @@ export default function BillingPage() {
                               {errorsPayment.paymentDate && (
                                 <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentDate.message}</p>
                               )}
-                              <p className="text-xs text-gray-500 mt-1">Time will be set to current time automatically.</p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                Time will be set to current time automatically.
+                              </p>
                             </div>
                             <button
                               type="submit"
@@ -1666,7 +1803,13 @@ export default function BillingPage() {
                                 loading ? "opacity-50 cursor-not-allowed" : ""
                               }`}
                             >
-                              {loading ? "Processing..." : <><Plus size={16} className="mr-2" /> Add Payment</>}
+                              {loading ? (
+                                "Processing..."
+                              ) : (
+                                <>
+                                  <Plus size={16} className="mr-2" /> Add Payment
+                                </>
+                              )}
                             </button>
                           </form>
                         </div>
@@ -1674,7 +1817,6 @@ export default function BillingPage() {
                     </div>
                   </div>
                 )}
-
                 {/* Consultants Tab */}
                 {activeTab === "consultants" && (
                   <div className="p-6">
@@ -1800,7 +1942,9 @@ export default function BillingPage() {
                               </div>
                             ) : (
                               <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Custom Doctor Name</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Custom Doctor Name
+                                </label>
                                 <input
                                   type="text"
                                   {...registerVisit("customDoctorName")}
@@ -1857,7 +2001,13 @@ export default function BillingPage() {
                                 loading ? "opacity-50 cursor-not-allowed" : ""
                               }`}
                             >
-                              {loading ? "Processing..." : <><Plus size={16} className="mr-2" /> Add Consultant Charge</>}
+                              {loading ? (
+                                "Processing..."
+                              ) : (
+                                <>
+                                  <Plus size={16} className="mr-2" /> Add Consultant Charge
+                                </>
+                              )}
                             </button>
                           </form>
                         </div>
@@ -1875,7 +2025,6 @@ export default function BillingPage() {
           </div>
         )}
       </main>
-
       {/* Payment History Modal */}
       <Transition appear show={isPaymentHistoryOpen} as={React.Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setIsPaymentHistoryOpen(false)}>
@@ -1915,7 +2064,9 @@ export default function BillingPage() {
                     <table className="w-full">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            #
+                          </th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Amount (₹)
                           </th>
@@ -1977,7 +2128,6 @@ export default function BillingPage() {
           </div>
         </Dialog>
       </Transition>
-
       {/* Discount Modal */}
       <Transition appear show={isDiscountModalOpen} as={React.Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setIsDiscountModalOpen(false)}>
@@ -2059,7 +2209,11 @@ export default function BillingPage() {
                           <Tag className="h-4 w-4 mr-1" />
                           This is equivalent to a{" "}
                           <span className="font-bold mx-1">
-                            {((watchDiscount("discount") / (hospitalServiceTotal + consultantChargeTotal)) * 100).toFixed(1)}%
+                            {(
+                              (watchDiscount("discount") / (hospitalServiceTotal + consultantChargeTotal)) *
+                              100
+                            ).toFixed(1)}
+                            %
                           </span>{" "}
                           discount
                         </p>
@@ -2097,7 +2251,6 @@ export default function BillingPage() {
           </div>
         </Dialog>
       </Transition>
-
       {/* Bulk Service Modal */}
       <BulkServiceModal
         isOpen={isBulkServiceModalOpen}
