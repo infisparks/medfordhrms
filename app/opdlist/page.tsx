@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import { db } from "@/lib/firebase"
 import { format } from "date-fns"
-import { ref, get, remove, onChildAdded, onChildChanged, onChildRemoved, off } from "firebase/database"
+import { ref, get, remove, onChildAdded, onChildChanged, onChildRemoved, off, query, orderByChild, equalTo, startAt, endAt } from "firebase/database"
 import { useRouter } from "next/navigation"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -117,164 +117,376 @@ export default function ManageOPDPage() {
   const [appointmentToDelete, setAppointmentToDelete] = useState<Appointment | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  // Function to clear all listeners
+  const clearAllListeners = () => {
+    if (uhidListenerRef.current && uhidListenerPath.current) {
+      off(ref(db, uhidListenerPath.current), "child_added", uhidListenerRef.current.added)
+      off(ref(db, uhidListenerPath.current), "child_changed", uhidListenerRef.current.changed)
+      off(ref(db, uhidListenerPath.current), "child_removed", uhidListenerRef.current.removed)
+    }
+    uhidListenerRef.current = null
+    uhidListenerPath.current = ""
+
+    phoneListenerRefs.current.forEach(({ path, added, changed, removed }) => {
+      off(ref(db, path), "child_added", added)
+      off(ref(db, path), "child_changed", changed)
+      off(ref(db, path), "child_removed", removed)
+    })
+    phoneListenerRefs.current = []
+  }
+
   // Clear listeners on unmount
   useEffect(() => {
     return () => {
-      if (uhidListenerRef.current && uhidListenerPath.current)
-        off(ref(db, uhidListenerPath.current), "child_added", uhidListenerRef.current)
-      phoneListenerRefs.current.forEach(({ path, fn }) => off(ref(db, path), "child_added", fn))
+      clearAllListeners()
     }
   }, [])
 
   // ============ Default Today List =============
+  // This effect will run on initial load and when the activeFilterTab is "today"
   useEffect(() => {
-    setIsLoading(true)
-    const todayKey = getTodayDateKey()
-    const opdRef = ref(db, `patients/opddetail/${todayKey}`)
-    get(opdRef).then((snap) => {
-      const data = snap.val()
-      const result: Appointment[] = []
-      let totalBytes = 0
-      if (data) {
-        Object.entries(data).forEach(([uhid, appts]: any) => {
-          Object.entries(appts || {}).forEach(([apptId, apptData]: any) => {
-            result.push(flattenAppointment(uhid, apptId, apptData))
-          })
-        })
-        totalBytes = byteSize(JSON.stringify(data))
-      }
-      setAppointments(result)
-      setDoctorTabs(collectDoctorTabs(result))
-      setDownloadedCount(result.length)
-      setDownloadedBytes(totalBytes)
-      setIsLoading(false)
-    }).catch(() => setIsLoading(false))
-  }, [])
+    // Only fetch today's data if no search is active
+    if (!uhidSearch && !phoneSearch && activeFilterTab === "today") {
+      setIsLoading(true)
+      clearAllListeners() // Clear any existing search listeners
 
-  // ============ UHID Search - Real-Time, Only That User =============
-  useEffect(() => {
-    if (uhidListenerRef.current && uhidListenerPath.current)
-      off(ref(db, uhidListenerPath.current), "child_added", uhidListenerRef.current)
-    uhidListenerRef.current = null
+      const todayKey = getTodayDateKey()
+      const opdRef = ref(db, `patients/opddetail/${todayKey}`)
 
-    if (!uhidSearch || uhidSearch.length < 8) return
+      const addedListener = onChildAdded(opdRef, (uhidSnap) => {
+        uhidSnap.forEach((apptSnap: any) => {
+          const newAppt = flattenAppointment(uhidSnap.key!, apptSnap.key!, apptSnap.val())
+          setAppointments((prev) => {
+            if (!prev.some(a => a.id === newAppt.id && a.patientId === newAppt.patientId)) {
+              const updated = [...prev, newAppt];
+              setDoctorTabs(collectDoctorTabs(updated));
+              setDownloadedCount(updated.length);
+              setDownloadedBytes(prevBytes => prevBytes + byteSize(JSON.stringify(apptSnap.val())));
+              return updated;
+            }
+            return prev;
+          });
+        });
+      });
 
-    setUhidSearchLoading(true)
-    const todayKey = getTodayDateKey()
-    const opdPath = `patients/opddetail/${todayKey}`
+      const changedListener = onChildChanged(opdRef, (uhidSnap) => {
+        uhidSnap.forEach((apptSnap: any) => {
+          const updatedAppt = flattenAppointment(uhidSnap.key!, apptSnap.key!, apptSnap.val());
+          setAppointments((prev) => {
+            const updated = prev.map(a =>
+              (a.id === updatedAppt.id && a.patientId === updatedAppt.patientId) ? updatedAppt : a
+            );
+            setDoctorTabs(collectDoctorTabs(updated));
+            return updated;
+          });
+        });
+      });
 
-    get(ref(db, opdPath)).then((snap) => {
-      const data = snap.val()
-      const result: Appointment[] = []
-      let totalBytes = 0
-      if (data) {
-        Object.entries(data).forEach(([uhid, appts]: any) => {
-          if (uhid.toLowerCase().startsWith(uhidSearch.toLowerCase())) {
+      const removedListener = onChildRemoved(opdRef, (uhidSnap) => {
+        uhidSnap.forEach((apptSnap: any) => {
+          setAppointments((prev) => {
+            const updated = prev.filter(a => !(a.id === apptSnap.key && a.patientId === uhidSnap.key));
+            setDoctorTabs(collectDoctorTabs(updated));
+            setDownloadedCount(updated.length);
+            setDownloadedBytes(prevBytes => prevBytes - byteSize(JSON.stringify(apptSnap.val()))); // Approximate
+            return updated;
+          });
+        });
+      });
+
+      // Initially fetch all data once to set the initial state
+      get(opdRef).then((snap) => {
+        const data = snap.val()
+        const result: Appointment[] = []
+        let totalBytes = 0
+        if (data) {
+          Object.entries(data).forEach(([uhid, appts]: any) => {
             Object.entries(appts || {}).forEach(([apptId, apptData]: any) => {
               result.push(flattenAppointment(uhid, apptId, apptData))
             })
-            totalBytes += byteSize(JSON.stringify(appts))
+          })
+          totalBytes = byteSize(JSON.stringify(data))
+        }
+        setAppointments(result)
+        setDoctorTabs(collectDoctorTabs(result))
+        setDownloadedCount(result.length)
+        setDownloadedBytes(totalBytes)
+        setIsLoading(false)
+      }).catch(() => setIsLoading(false))
+
+      uhidListenerRef.current = { added: addedListener, changed: changedListener, removed: removedListener };
+      uhidListenerPath.current = `patients/opddetail/${todayKey}`;
+    }
+  }, [activeFilterTab, uhidSearch, phoneSearch]) // Re-run if filter changes, or searches are cleared
+
+  // ============ UHID Search Logic =============
+  useEffect(() => {
+    clearAllListeners() // Clear other listeners when a new search starts
+    setAppointments([]) // Clear previous appointments
+
+    if (!uhidSearch) {
+      setUhidSearchLoading(false)
+      return
+    }
+
+    setUhidSearchLoading(true)
+
+    if (uhidSearch.length >= 10) { // Assuming 10 digits for a full UHID
+      // Full UHID search across all data
+      const patientInfoRef = query(ref(db, `patients/patientinfo`), orderByChild('uhid'), equalTo(uhidSearch));
+
+      get(patientInfoRef)
+        .then(async (snapshot) => {
+          const result: Appointment[] = [];
+          let totalBytes = 0;
+          if (snapshot.exists()) {
+            const patientData = snapshot.val();
+            const patientId = Object.keys(patientData)[0]; // Assuming UHID is unique and corresponds to patientId
+
+            // Now fetch appointments for this patientId across all dates
+            const opdDetailRef = ref(db, `patients/opddetail`);
+            const opdSnapshot = await get(opdDetailRef);
+
+            if (opdSnapshot.exists()) {
+              opdSnapshot.forEach((dateSnap: any) => {
+                const dateData = dateSnap.val();
+                if (dateData[patientId]) {
+                  Object.entries(dateData[patientId]).forEach(([apptId, apptData]: any) => {
+                    result.push(flattenAppointment(patientId, apptId, apptData));
+                    totalBytes += byteSize(JSON.stringify(apptData));
+                  });
+                }
+              });
+            }
+          }
+          setAppointments(result);
+          setDoctorTabs([]); // Clear doctor tabs for search results
+          setDownloadedCount(result.length);
+          setDownloadedBytes(totalBytes);
+          setUhidSearchLoading(false);
+        })
+        .catch((error) => {
+          console.error("Error fetching UHID search:", error);
+          setUhidSearchLoading(false);
+          toast.error("Failed to search by UHID.", { position: "top-right", autoClose: 5000 });
+        });
+
+    } else { // Partial UHID search (less than 10 chars) - limited to today's data
+      const todayKey = getTodayDateKey()
+      const opdPath = `patients/opddetail/${todayKey}`
+      const opdRef = ref(db, opdPath)
+
+      get(opdRef).then((snap) => {
+        const data = snap.val()
+        const result: Appointment[] = []
+        let totalBytes = 0
+        if (data) {
+          Object.entries(data).forEach(([uhid, appts]: any) => {
+            if (uhid.toLowerCase().startsWith(uhidSearch.toLowerCase())) {
+              Object.entries(appts || {}).forEach(([apptId, apptData]: any) => {
+                result.push(flattenAppointment(uhid, apptId, apptData))
+                totalBytes += byteSize(JSON.stringify(apptData))
+              })
+            }
+          })
+        }
+        setAppointments(result)
+        setDoctorTabs([])
+        setDownloadedCount(result.length)
+        setDownloadedBytes(totalBytes)
+        setUhidSearchLoading(false)
+
+        // Set up real-time listeners for partial UHID search on today's data
+        Object.keys(data || {}).forEach((uhid) => {
+          if (uhid.toLowerCase().startsWith(uhidSearch.toLowerCase())) {
+            const path = `patients/opddetail/${todayKey}/${uhid}`
+
+            const added = (snap: any) => {
+              setAppointments((prev: Appointment[]) => {
+                const found = prev.find(a => a.id === snap.key && a.patientId === uhid)
+                if (found) return prev
+                const val = snap.val()
+                if (!val) return prev
+                return [...prev, flattenAppointment(uhid, snap.key, val)]
+              })
+            }
+            const changed = (snap: any) => {
+              setAppointments((prev: Appointment[]) =>
+                prev.map(a => (a.id === snap.key && a.patientId === uhid)
+                  ? flattenAppointment(uhid, snap.key, snap.val())
+                  : a
+                )
+              )
+            }
+            const removed = (snap: any) => {
+              setAppointments((prev: Appointment[]) => prev.filter(a => !(a.id === snap.key && a.patientId === uhid)))
+            }
+
+            onChildAdded(ref(db, path), added)
+            onChildChanged(ref(db, path), changed)
+            onChildRemoved(ref(db, path), removed)
+            uhidListenerRef.current = { added, changed, removed }
+            uhidListenerPath.current = path
           }
         })
-      }
-      setAppointments(result)
-      setDoctorTabs([])
-      setDownloadedCount(result.length)
-      setDownloadedBytes(totalBytes)
-      setUhidSearchLoading(false)
+      }).catch((error) => {
+        console.error("Error fetching partial UHID search:", error);
+        setUhidSearchLoading(false);
+        toast.error("Failed to search by UHID.", { position: "top-right", autoClose: 5000 });
+      })
+    }
+  }, [uhidSearch])
 
-      Object.keys(data || {}).forEach((uhid) => {
-        if (uhid.toLowerCase().startsWith(uhidSearch.toLowerCase())) {
-          const path = `patients/opddetail/${todayKey}/${uhid}`
-          const fn = (snap: any) => {
+  // ============ Phone Search Logic =============
+  useEffect(() => {
+    clearAllListeners() // Clear other listeners when a new search starts
+    setAppointments([]) // Clear previous appointments
+
+    if (!phoneSearch) {
+      setPhoneSearchLoading(false);
+      return;
+    }
+
+    setPhoneSearchLoading(true);
+
+    if (phoneSearch.length === 10) { // Full 10-digit phone number search
+      const opdRef = ref(db, `patients/opddetail`);
+
+      get(opdRef).then((dateSnapshots) => {
+        const result: Appointment[] = [];
+        let totalBytes = 0;
+
+        const promises: Promise<void>[] = [];
+
+        dateSnapshots.forEach((dateSnap) => {
+          const dateKey = dateSnap.key;
+          const patientsForDate = dateSnap.val();
+
+          if (patientsForDate) {
+            Object.entries(patientsForDate).forEach(([patientId, appointmentsForPatient]: any) => {
+              Object.entries(appointmentsForPatient || {}).forEach(([apptId, apptData]: any) => {
+                if (apptData.phone === phoneSearch) {
+                  result.push(flattenAppointment(patientId, apptId, apptData));
+                  totalBytes += byteSize(JSON.stringify(apptData));
+                }
+              });
+            });
+          }
+        });
+
+        // Set up real-time listeners for *all* appointments that match the phone number
+        // This is tricky as we need to listen on each date and patientId path.
+        // A more scalable solution for full phone search with real-time updates might involve
+        // a Cloud Function to denormalize data or a separate index.
+        // For now, we'll set up listeners for the found appointments.
+
+        result.forEach((appt) => {
+          const path = `patients/opddetail/${format(new Date(appt.date), "yyyy-MM-dd")}/${appt.patientId}`;
+          const added = (snap: any) => {
             setAppointments((prev: Appointment[]) => {
-              const found = prev.find(a => a.id === snap.key && a.patientId === uhid)
+              const found = prev.find(a => a.id === snap.key && a.patientId === appt.patientId);
+              if (found) return prev;
+              const val = snap.val();
+              if (!val) return prev;
+              if (val.phone === phoneSearch) { // Ensure new child also matches phone
+                return [...prev, flattenAppointment(appt.patientId, snap.key, val)];
+              }
+              return prev;
+            });
+          };
+          const changed = (snap: any) => {
+            setAppointments((prev: Appointment[]) =>
+              prev.map(a => (a.id === snap.key && a.patientId === appt.patientId)
+                ? flattenAppointment(appt.patientId, snap.key, snap.val())
+                : a
+              )
+            );
+          };
+          const removed = (snap: any) => {
+            setAppointments((prev: Appointment[]) => prev.filter(a => !(a.id === snap.key && a.patientId === appt.patientId)));
+          };
+          onChildAdded(ref(db, path), added);
+          onChildChanged(ref(db, path), changed);
+          onChildRemoved(ref(db, path), removed);
+          phoneListenerRefs.current.push({ path, added, changed, removed });
+        });
+
+        setAppointments(result);
+        setDoctorTabs([]);
+        setDownloadedCount(result.length);
+        setDownloadedBytes(totalBytes);
+        setPhoneSearchLoading(false);
+
+      }).catch((error) => {
+        console.error("Error fetching phone search:", error);
+        setPhoneSearchLoading(false);
+        toast.error("Failed to search by phone number.", { position: "top-right", autoClose: 5000 });
+      });
+
+    } else { // Partial phone search (less than 10 digits) - limited to today's data
+      const todayKey = getTodayDateKey()
+      const opdPath = `patients/opddetail/${todayKey}`
+      const opdRef = ref(db, opdPath)
+
+      get(opdRef).then((snap) => {
+        const data = snap.val()
+        const result: Appointment[] = []
+        let totalBytes = 0
+        if (data) {
+          Object.entries(data).forEach(([uhid, appts]: any) => {
+            Object.entries(appts || {}).forEach(([apptId, apptData]: any) => {
+              if (apptData.phone && apptData.phone.startsWith(phoneSearch)) {
+                result.push(flattenAppointment(uhid, apptId, apptData))
+                totalBytes += byteSize(JSON.stringify(apptData))
+              }
+            })
+          })
+        }
+        setAppointments(result)
+        setDoctorTabs([])
+        setDownloadedCount(result.length)
+        setDownloadedBytes(totalBytes)
+        setPhoneSearchLoading(false)
+
+        // Set up real-time listeners for partial phone search on today's data
+        result.forEach((appt) => {
+          const path = `patients/opddetail/${todayKey}/${appt.patientId}`
+          const added = (snap: any) => {
+            setAppointments((prev: Appointment[]) => {
+              const found = prev.find(a => a.id === snap.key && a.patientId === appt.patientId)
               if (found) return prev
               const val = snap.val()
               if (!val) return prev
-              return [...prev, flattenAppointment(uhid, snap.key, val)]
+              if (val.phone && val.phone.startsWith(phoneSearch)) {
+                return [...prev, flattenAppointment(appt.patientId, snap.key, val)]
+              }
+              return prev
             })
           }
-          onChildAdded(ref(db, path), fn)
-          onChildChanged(ref(db, path), (snap: any) => {
+          const changed = (snap: any) => {
             setAppointments((prev: Appointment[]) =>
-              prev.map(a => (a.id === snap.key && a.patientId === uhid)
-                ? flattenAppointment(uhid, snap.key, snap.val())
+              prev.map(a => (a.id === snap.key && a.patientId === appt.patientId)
+                ? flattenAppointment(appt.patientId, snap.key, snap.val())
                 : a
               )
             )
-          })
-          onChildRemoved(ref(db, path), (snap: any) => {
-            setAppointments((prev: Appointment[]) => prev.filter(a => !(a.id === snap.key && a.patientId === uhid)))
-          })
-          uhidListenerRef.current = fn
-          uhidListenerPath.current = path
-        }
+          }
+          const removed = (snap: any) => {
+            setAppointments((prev: Appointment[]) => prev.filter(a => !(a.id === snap.key && a.patientId === appt.patientId)))
+          }
+          onChildAdded(ref(db, path), added)
+          onChildChanged(ref(db, path), changed)
+          onChildRemoved(ref(db, path), removed)
+          phoneListenerRefs.current.push({ path, added, changed, removed })
+        })
+      }).catch((error) => {
+        console.error("Error fetching partial phone search:", error);
+        setPhoneSearchLoading(false);
+        toast.error("Failed to search by phone number.", { position: "top-right", autoClose: 5000 });
       })
-    })
-  }, [uhidSearch])
-
-  // ============ Phone Search - Real-Time, Only Matching Phones =============
-  useEffect(() => {
-    phoneListenerRefs.current.forEach(({ path, fn }) => off(ref(db, path), "child_added", fn))
-    phoneListenerRefs.current = []
-
-    if (!phoneSearch || phoneSearch.length !== 10) return
-
-    setPhoneSearchLoading(true)
-    const todayKey = getTodayDateKey()
-    const opdPath = `patients/opddetail/${todayKey}`
-
-    get(ref(db, opdPath)).then((snap) => {
-      const data = snap.val()
-      const result: Appointment[] = []
-      let totalBytes = 0
-      if (data) {
-        Object.entries(data).forEach(([uhid, appts]: any) => {
-          Object.entries(appts || {}).forEach(([apptId, apptData]: any) => {
-            if (apptData.phone === phoneSearch) {
-              result.push(flattenAppointment(uhid, apptId, apptData))
-              totalBytes += byteSize(JSON.stringify(apptData))
-            }
-          })
-        })
-      }
-      setAppointments(result)
-      setDoctorTabs([])
-      setDownloadedCount(result.length)
-      setDownloadedBytes(totalBytes)
-      setPhoneSearchLoading(false)
-
-      result.forEach((appt) => {
-        const path = `patients/opddetail/${todayKey}/${appt.patientId}`
-        const fn = (snap: any) => {
-          setAppointments((prev: Appointment[]) => {
-            const found = prev.find(a => a.id === snap.key && a.patientId === appt.patientId)
-            if (found) return prev
-            const val = snap.val()
-            if (!val) return prev
-            if (val.phone === phoneSearch) {
-              return [...prev, flattenAppointment(appt.patientId, snap.key, val)]
-            }
-            return prev
-          })
-        }
-        onChildAdded(ref(db, path), fn)
-        phoneListenerRefs.current.push({ path, fn })
-        onChildChanged(ref(db, path), (snap: any) => {
-          setAppointments((prev: Appointment[]) =>
-            prev.map(a => (a.id === snap.key && a.patientId === appt.patientId)
-              ? flattenAppointment(appt.patientId, snap.key, snap.val())
-              : a
-            )
-          )
-        })
-        onChildRemoved(ref(db, path), (snap: any) => {
-          setAppointments((prev: Appointment[]) => prev.filter(a => !(a.id === snap.key && a.patientId === appt.patientId)))
-        })
-      })
-    })
+    }
   }, [phoneSearch])
+
 
   // ============ Filtered Appointments for Doctor Tabs ============
   const filteredAndSortedAppointments = [...appointments]
@@ -394,11 +606,11 @@ export default function ManageOPDPage() {
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center gap-2">
                     <Input
-                      placeholder="Search by UHID (type at least 8 chars)"
+                      placeholder="Search by UHID (enter 10+ for full search)"
                       value={uhidSearch}
                       onChange={(e) => {
                         setUhidSearch(e.target.value)
-                        setPhoneSearch("")
+                        setPhoneSearch("") // Clear phone search when UHID search is active
                       }}
                       className="max-w-xs"
                     />
@@ -409,7 +621,9 @@ export default function ManageOPDPage() {
                       </Button>
                     )}
                   </div>
-                  <span className="text-xs text-gray-500">Enter at least 8 characters for partial search, or full UHID</span>
+                  <span className="text-xs text-gray-500">
+                    Enter fewer than 10 characters for today's appointments, 10 or more for full search
+                  </span>
                 </div>
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center gap-2">
@@ -419,7 +633,7 @@ export default function ManageOPDPage() {
                       onChange={(e) => {
                         const val = e.target.value.replace(/\D/g, "")
                         setPhoneSearch(val.slice(0, 10))
-                        setUhidSearch("")
+                        setUhidSearch("") // Clear UHID search when phone search is active
                       }}
                       className="max-w-xs"
                     />
@@ -430,7 +644,9 @@ export default function ManageOPDPage() {
                       </Button>
                     )}
                   </div>
-                  <span className="text-xs text-gray-500">Type 10-digit number to search appointments</span>
+                  <span className="text-xs text-gray-500">
+                    Type 10-digit number to search all appointments, fewer for today's appointments
+                  </span>
                 </div>
                 <span className="text-xs text-gray-500">
                   Downloaded: <b>{downloadedCount}</b> record{downloadedCount === 1 ? "" : "s"},{" "}
