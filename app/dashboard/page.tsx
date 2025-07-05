@@ -343,7 +343,7 @@ const DashboardPage: React.FC = () => {
           const opdSnap = await get(ref(db, `patients/opddetail/${todayDate}`))
           if (opdSnap.exists()) {
             const data = opdSnap.val()
-            let opdBytes = JSON.stringify(data).length
+            const opdBytes = JSON.stringify(data).length
             for (const pid in data) {
               for (const aid in data[pid]) {
                 const ap = data[pid][aid]
@@ -457,7 +457,7 @@ const DashboardPage: React.FC = () => {
           const otSnap = await get(ref(db, `patients/ot/${todayDate}`))
           if (otSnap.exists()) {
             const otData = otSnap.val()
-            let otBytes = JSON.stringify(otData).length
+            const otBytes = JSON.stringify(otData).length
             for (const pid in otData) {
               for (const ipdid in otData[pid]) {
                 const od = otData[pid][ipdid]
@@ -1104,7 +1104,7 @@ const DashboardPage: React.FC = () => {
                   <Activity className="text-white h-6 w-6" />
                 </div>
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-sky-600 to-blue-600 bg-clip-text text-transparent">
-                 G-MEDFORD-NX HOSPITAL
+                 MEDFORD HOSPITAL
                 </h1>
               </div>
               <div className="relative w-full md:w-1/3">
