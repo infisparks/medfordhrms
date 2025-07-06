@@ -3,7 +3,7 @@
 import type React from "react"
 import { useEffect, useState, useMemo, useCallback } from "react"
 import { db } from "@/lib/firebase"
-import { ref, get, onChildAdded, onChildChanged, onChildRemoved } from "firebase/database"
+import { ref, get } from "firebase/database" // Removed onChildAdded, onChildChanged, onChildRemoved as they are not used for historical ranges
 import { format, differenceInDays, addDays } from "date-fns"
 import { Bar } from "react-chartjs-2"
 import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip, Legend } from "chart.js"
@@ -59,7 +59,7 @@ interface IPayment {
 
 interface OPDAppointment {
   id: string
-  patientId: string
+  patientId: string // This is the UHID if available, or a unique ID from the path
   name: string
   phone: string
   date: string
@@ -94,8 +94,8 @@ interface IPDPayment {
 
 interface IPDAppointment {
   id: string
-  patientId: string
-  uhid: string
+  patientId: string // This is the UHID if available, or a unique ID from the path
+  uhid: string // Explicitly UHID for IPD
   name: string
   phone: string
   admissionDate: string
@@ -113,13 +113,13 @@ interface IPDAppointment {
   createdAt: string
   remainingAmount?: number // This will be (totalAmount - discount) - totalDeposit
   type: "IPD"
-  details?: any
+  details?: any // For full IPD details if needed
 }
 
 interface OTAppointment {
   id: string
-  patientId: string
-  uhid: string
+  patientId: string // This is the UHID if available, or a unique ID from the path
+  uhid: string // Explicitly UHID for OT
   name: string
   phone: string
   date: string
@@ -180,8 +180,8 @@ const getMonthRange = (monthYear: string) => {
   const start = new Date(year, month - 1, 1)
   const end = new Date(year, month, 0)
   return {
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10),
+    start: format(start, "yyyy-MM-dd"),
+    end: format(end, "yyyy-MM-dd"),
   }
 }
 
@@ -193,7 +193,6 @@ const DashboardPage: React.FC = () => {
   const [ipdAppointments, setIpdAppointments] = useState<IPDAppointment[]>([])
   const [otAppointments, setOtAppointments] = useState<OTAppointment[]>([])
   const [doctors, setDoctors] = useState<{ [key: string]: Doctor }>({})
-  const [patientCache, setPatientCache] = useState<{ [key: string]: PatientInfo }>({})
   const [filters, setFilters] = useState<FilterState>({
     searchQuery: "",
     filterType: "today", // Set default to 'today'
@@ -226,6 +225,7 @@ const DashboardPage: React.FC = () => {
         return getMonthRange(filters.selectedMonth)
       case "dateRange":
         return { start: filters.startDate, end: filters.endDate }
+      case "week":
       default:
         return getThisWeekRange()
     }
@@ -234,83 +234,72 @@ const DashboardPage: React.FC = () => {
   // Fetch doctors once
   useEffect(() => {
     get(ref(db, "doctors")).then((snap) => {
-      if (snap.exists()) setDoctors(snap.val() as any)
-    })
+      if (snap.exists()) {
+        setDoctors(snap.val() as any)
+      } else {
+        console.warn("Doctors data not found.")
+      }
+    }).catch(err => {
+      console.error("Failed to fetch doctors:", err);
+      toast.error("Failed to load doctor data.");
+    });
   }, [])
-
-  // Cache patient info
-  const fetchPatientInfo = useCallback(
-    async (id: string): Promise<PatientInfo | null> => {
-      if (patientCache[id]) return patientCache[id]
-      try {
-        const snap = await get(ref(db, `patients/patientinfo/${id}`))
-        if (snap.exists()) {
-          const d = snap.val()
-          const info: PatientInfo = {
-            uhid: d.uhid,
-            name: d.name,
-            phone: d.phone,
-            age: d.age || 0,
-            address: d.address || "",
-            gender: d.gender || "",
-          }
-          setPatientCache((prev) => ({ ...prev, [id]: info }))
-          return info
-        }
-      } catch {}
-      return null
-    },
-    [patientCache],
-  )
 
   // Main data fetching logic (combines initial load and filter changes)
   useEffect(() => {
-    const fetchAndListen = async () => {
+    const fetchAppointments = async () => {
       setIsLoading(true)
       setOpdAppointments([])
       setIpdAppointments([])
       setOtAppointments([])
-      setSearchedPatients([])
-      setTotalDownloadedBytes(0) // Reset total downloaded bytes
+      setSearchedPatients([]) // Clear search results when not in search mode
+      setTotalDownloadedBytes(0) // Reset total downloaded bytes for main dashboard data
 
       if (filters.searchQuery) {
-        // Search mode: Query patientinfo
-        if (filters.searchQuery.length < 6) {
+        // Search mode: Query patientinfo directly (client-side filtering for demonstration)
+        if (filters.searchQuery.length < 3) { // Lowered threshold for demonstration
           setIsLoading(false)
           setSearchedPatients([])
           setSearchDownloadedBytes(0)
-          return // Don't search until 6 characters
+          return // Don't search until sufficient characters
         }
 
         const q = filters.searchQuery.toLowerCase()
         const patientInfoRef = ref(db, "patients/patientinfo")
+        let currentSearchBytes = 0;
         try {
+          // *** WARNING: This fetches ALL patientinfo for client-side filtering. ***
+          // *** For large datasets, this must be replaced with a backend search solution. ***
           const patientSnap = await get(patientInfoRef)
-          let currentSearchBytes = 0
           if (patientSnap.exists()) {
-            const allPatients: PatientInfo[] = []
-            const rawData = patientSnap.val()
-            currentSearchBytes = JSON.stringify(rawData).length // Size of all patientinfo
-            Object.values(rawData).forEach((data: any) => {
+            const allPatients: PatientInfo[] = [];
+            const rawData = patientSnap.val();
+            currentSearchBytes = JSON.stringify(rawData).length; // Size of all patientinfo
+
+            Object.keys(rawData).forEach((uhid) => {
+              const data = rawData[uhid];
+              // Ensure uhid is always present
               allPatients.push({
-                uhid: data.uhid,
-                name: data.name,
-                phone: data.phone,
+                uhid: uhid,
+                name: data.name || "",
+                phone: data.phone || "",
                 age: data.age || 0,
                 address: data.address || "",
                 gender: data.gender || "",
-              })
-            })
+              });
+            });
 
             const matchingPatients = allPatients.filter(
-              (p) => p.name.toLowerCase().includes(q) || p.phone.includes(q) || p.uhid.toLowerCase().includes(q),
-            )
-            // Limit to 10 for display
-            setSearchedPatients(matchingPatients.slice(0, 10))
+              (p) =>
+                p.name.toLowerCase().includes(q) ||
+                p.phone.includes(q) ||
+                p.uhid.toLowerCase().includes(q)
+            );
+            setSearchedPatients(matchingPatients.slice(0, 10)); // Limit for display
           } else {
             setSearchedPatients([])
           }
-          setSearchDownloadedBytes(currentSearchBytes)
+          setSearchDownloadedBytes(currentSearchBytes);
         } catch (err) {
           console.error("Error searching patients:", err)
           toast.error("Failed to search patients.")
@@ -322,7 +311,7 @@ const DashboardPage: React.FC = () => {
         return // Exit, as we are in search mode
       }
 
-      // Default mode: Fetch appointments by date range or listen for today's data
+      // Default mode: Fetch appointments by date range
       const { start, end } = currentDateRange
       if (!start || !end) {
         setIsLoading(false)
@@ -332,32 +321,47 @@ const DashboardPage: React.FC = () => {
       const tempOpd: OPDAppointment[] = []
       const tempIpd: IPDAppointment[] = []
       const tempOt: OTAppointment[] = []
-      const currentTotalBytes = 0
+      let totalBytesForPeriod = 0;
 
-      const todayDate = getTodayDate()
+      const dt = new Date(start)
+      const endDt = new Date(end)
 
-      // If filtering for today, fetch all today's data once (not listeners)
-      if (filters.filterType === "today") {
-        try {
-          // OPD
-          const opdSnap = await get(ref(db, `patients/opddetail/${todayDate}`))
-          if (opdSnap.exists()) {
-            const data = opdSnap.val()
-            const opdBytes = JSON.stringify(data).length
-            for (const pid in data) {
-              for (const aid in data[pid]) {
-                const ap = data[pid][aid]
-                const info =
-                  ap.name && ap.phone
-                    ? { name: ap.name, phone: ap.phone, uhid: pid, age: 0, address: "", gender: "" }
-                    : await fetchPatientInfo(pid)
-                if (info) {
+      const dailyFetchPromises: Promise<void>[] = [];
+
+      while (dt <= endDt) {
+        const dateStr = format(dt, "yyyy-MM-dd")
+        dailyFetchPromises.push(
+          (async () => {
+            const [opdSnap, ipdInfoSnap, ipdBillingSnap, otSnap] = await Promise.all([
+              get(ref(db, `patients/opddetail/${dateStr}`)),
+              get(ref(db, `patients/ipddetail/userinfoipd/${dateStr}`)),
+              get(ref(db, `patients/ipddetail/userbillinginfoipd/${dateStr}`)),
+              get(ref(db, `patients/ot/${dateStr}`)),
+            ]);
+
+            // Track bytes for each daily fetch
+            let currentDayBytes = 0;
+            if (opdSnap.exists()) currentDayBytes += JSON.stringify(opdSnap.val()).length;
+            if (ipdInfoSnap.exists()) currentDayBytes += JSON.stringify(ipdInfoSnap.val()).length;
+            if (ipdBillingSnap.exists()) currentDayBytes += JSON.stringify(ipdBillingSnap.val()).length;
+            if (otSnap.exists()) currentDayBytes += JSON.stringify(otSnap.val()).length;
+            
+            // Atomically update totalDownloadedBytes
+            setTotalDownloadedBytes(prev => prev + currentDayBytes);
+
+            // Process OPD
+            if (opdSnap.exists()) {
+              const data = opdSnap.val();
+              for (const patientId in data) { // patientId is UHID or unique ID
+                for (const appId in data[patientId]) {
+                  const ap = data[patientId][appId];
+                  // Use name and phone directly from the appointment object
                   tempOpd.push({
-                    id: `${pid}_${aid}`,
-                    patientId: pid,
-                    name: info.name,
-                    phone: info.phone,
-                    date: todayDate,
+                    id: `${patientId}_${appId}`,
+                    patientId: patientId, // The ID from the path
+                    name: ap.name || "Unknown", // Always use provided name
+                    phone: ap.phone || "N/A", // Always use provided phone
+                    date: dateStr,
                     time: ap.time || "",
                     appointmentType: ap.appointmentType || "",
                     createdAt: ap.createdAt,
@@ -378,65 +382,57 @@ const DashboardPage: React.FC = () => {
                     study: ap.study || "",
                     visitType: ap.visitType || "",
                     type: "OPD",
-                  })
+                  });
                 }
               }
             }
-            setTotalDownloadedBytes((prev) => prev + opdBytes)
-          }
 
-          // IPD
-          const ipdInfoSnap = await get(ref(db, `patients/ipddetail/userinfoipd/${todayDate}`))
-          const billingSnap = await get(ref(db, `patients/ipddetail/userbillinginfoipd/${todayDate}`))
-          let ipdBytes = 0
-          const billingByPid: Record<string, any> = billingSnap.exists() ? billingSnap.val() : {}
-          if (billingSnap.exists()) ipdBytes += JSON.stringify(billingSnap.val()).length
-          if (ipdInfoSnap.exists()) {
-            const ipdData = ipdInfoSnap.val()
-            ipdBytes += JSON.stringify(ipdData).length
-            for (const pid in ipdData) {
-              for (const ipdid in ipdData[pid]) {
-                const rec = ipdData[pid][ipdid]
-                const info = await fetchPatientInfo(pid)
-                const bill = billingByPid[pid]?.[ipdid] || {}
+            // Process IPD
+            const billingByPid: Record<string, any> = ipdBillingSnap.exists() ? ipdBillingSnap.val() : {};
+            if (ipdInfoSnap.exists()) {
+              const ipdData = ipdInfoSnap.val();
+              for (const patientId in ipdData) { // patientId is UHID or unique ID
+                for (const ipdId in ipdData[patientId]) {
+                  const rec = ipdData[patientId][ipdId];
+                  const bill = billingByPid[patientId]?.[ipdId] || {};
 
-                const payments: IPDPayment[] = []
-                let netDep = 0
-                let totalRe = 0
-                if (bill.payments) {
-                  Object.values(bill.payments).forEach((p: any) => {
-                    payments.push(p)
-                    if (p.type === "advance") netDep += +p.amount
-                    else {
-                      netDep -= +p.amount
-                      totalRe += +p.amount
-                    }
-                  })
-                }
-                const services: IPDService[] = (bill.services || []).map((s: any) => ({
-                  amount: +s.amount || 0,
-                  serviceName: s.serviceName || "",
-                  type: s.type || "",
-                  doctorName: s.doctorName,
-                  createdAt: s.createdAt,
-                }))
-                const totalSvc = services.reduce((sum, s) => sum + s.amount, 0)
-                const discountAmount = Number(bill.discount) || 0
-                const remaining = totalSvc - discountAmount - netDep
+                  const payments: IPDPayment[] = [];
+                  let netDep = 0;
+                  let totalRe = 0;
+                  if (bill.payments) {
+                    Object.values(bill.payments).forEach((p: any) => {
+                      payments.push(p);
+                      if (p.type === "advance") netDep += +p.amount;
+                      else {
+                        netDep -= +p.amount;
+                        totalRe += +p.amount;
+                      }
+                    });
+                  }
+                  const services: IPDService[] = (bill.services || []).map((s: any) => ({
+                    amount: +s.amount || 0,
+                    serviceName: s.serviceName || "",
+                    type: s.type || "",
+                    doctorName: s.doctorName,
+                    createdAt: s.createdAt,
+                  }));
+                  const totalSvc = services.reduce((sum, s) => sum + s.amount, 0);
+                  const discountAmount = Number(bill.discount) || 0;
+                  const remaining = totalSvc - discountAmount - netDep;
 
-                if (info) {
+                  // Use name and phone directly from the IPD record
                   tempIpd.push({
-                    id: `${pid}_${ipdid}`,
-                    patientId: pid,
-                    uhid: info.uhid,
-                    name: info.name,
-                    phone: info.phone,
-                    admissionDate: todayDate,
-                    admissionTime: rec.admissionTime,
+                    id: `${patientId}_${ipdId}`,
+                    patientId: patientId, // The ID from the path
+                    uhid: rec.uhid || patientId, // Prefer explicit UHID if present, else path ID
+                    name: rec.name || "Unknown", // Always use provided name
+                    phone: rec.phone || "N/A", // Always use provided phone
+                    admissionDate: dateStr,
+                    admissionTime: rec.admissionTime || "",
                     doctor: doctors[rec.doctor]?.name || "Unknown",
                     doctorId: rec.doctor,
-                    roomType: rec.roomType,
-                    status: rec.status,
+                    roomType: rec.roomType || "",
+                    status: rec.status || "",
                     services,
                     totalAmount: totalSvc,
                     totalDeposit: netDep,
@@ -446,224 +442,56 @@ const DashboardPage: React.FC = () => {
                     remainingAmount: remaining,
                     createdAt: rec.createdAt,
                     type: "IPD",
-                  })
+                  });
                 }
               }
             }
-            setTotalDownloadedBytes((prev) => prev + ipdBytes)
-          }
 
-          // OT
-          const otSnap = await get(ref(db, `patients/ot/${todayDate}`))
-          if (otSnap.exists()) {
-            const otData = otSnap.val()
-            const otBytes = JSON.stringify(otData).length
-            for (const pid in otData) {
-              for (const ipdid in otData[pid]) {
-                const od = otData[pid][ipdid]
-                const info = await fetchPatientInfo(pid)
-                if (info) {
+            // Process OT
+            if (otSnap.exists()) {
+              const otData = otSnap.val();
+              for (const patientId in otData) { // patientId is UHID or unique ID
+                for (const ipdId in otData[patientId]) { // this 'ipdId' is the unique OT ID, not IPD's ID
+                  const od = otData[patientId][ipdId];
+                  // Use name and phone directly from the OT record
                   tempOt.push({
-                    id: `${pid}_${ipdid}_${od.createdAt}`,
-                    patientId: pid,
-                    uhid: info.uhid,
-                    name: info.name,
-                    phone: info.phone,
-                    date: od.date || todayDate,
+                    id: `${patientId}_${ipdId}_${od.createdAt}`, // Ensure unique ID for OT
+                    patientId: patientId, // The ID from the path
+                    uhid: od.uhid || patientId, // Prefer explicit UHID if present, else path ID
+                    name: od.name || "Unknown", // Always use provided name
+                    phone: od.phone || "N/A", // Always use provided phone
+                    date: od.date || dateStr,
                     time: od.time || "",
                     message: od.message || "",
                     createdAt: od.createdAt,
-                    ipdId: ipdid,
+                    ipdId: ipdId, // The unique ID for this OT entry
                     type: "OT",
-                  })
+                  });
                 }
               }
             }
-            setTotalDownloadedBytes((prev) => prev + otBytes)
-          }
-
-          setOpdAppointments(tempOpd)
-          setIpdAppointments(tempIpd)
-          setOtAppointments(tempOt)
-        } catch (err) {
-          console.error("Error fetching today's data:", err)
-          toast.error("Failed to load today's data.")
-          setOpdAppointments([])
-          setIpdAppointments([])
-          setOtAppointments([])
-        } finally {
-          setIsLoading(false)
-        }
-        return
-      } else {
-        // For historical ranges, fetch data once
-        const tasks: Promise<void>[] = []
-        const dt = new Date(start)
-        const endDt = new Date(end)
-
-        while (dt <= endDt) {
-          const dateStr = format(dt, "yyyy-MM-dd")
-          tasks.push(
-            (async () => {
-              const [opSnap, ipdInfoSnap, billingSnap, otSnap] = await Promise.all([
-                get(ref(db, `patients/opddetail/${dateStr}`)),
-                get(ref(db, `patients/ipddetail/userinfoipd/${dateStr}`)),
-                get(ref(db, `patients/ipddetail/userbillinginfoipd/${dateStr}`)),
-                get(ref(db, `patients/ot/${dateStr}`)),
-              ])
-
-              let dateBytes = 0
-
-              // OPD
-              if (opSnap.exists()) {
-                const data = opSnap.val()
-                dateBytes += JSON.stringify(data).length
-                for (const pid in data) {
-                  for (const aid in data[pid]) {
-                    const ap = data[pid][aid]
-                    const info =
-                      ap.name && ap.phone
-                        ? { name: ap.name, phone: ap.phone, uhid: pid, age: 0, address: "", gender: "" }
-                        : await fetchPatientInfo(pid)
-                    if (info) {
-                      tempOpd.push({
-                        id: `${pid}_${aid}`,
-                        patientId: pid,
-                        name: info.name,
-                        phone: info.phone,
-                        date: dateStr,
-                        time: ap.time || "",
-                        appointmentType: ap.appointmentType || "",
-                        createdAt: ap.createdAt,
-                        enteredBy: ap.enteredBy || "",
-                        message: ap.message || "",
-                        modalities: ap.modalities || [],
-                        opdType: ap.opdType || "",
-                        payment: ap.payment || {
-                          cashAmount: 0,
-                          createdAt: "",
-                          discount: 0,
-                          onlineAmount: 0,
-                          paymentMethod: "cash",
-                          totalCharges: 0,
-                          totalPaid: 0,
-                        },
-                        referredBy: ap.referredBy || "",
-                        study: ap.study || "",
-                        visitType: ap.visitType || "",
-                        type: "OPD",
-                      })
-                    }
-                  }
-                }
-              }
-
-              // IPD
-              const billingByPid: Record<string, any> = billingSnap.exists() ? billingSnap.val() : {}
-              if (billingSnap.exists()) dateBytes += JSON.stringify(billingSnap.val()).length
-              if (ipdInfoSnap.exists()) {
-                const ipdData = ipdInfoSnap.val()
-                dateBytes += JSON.stringify(ipdData).length
-                for (const pid in ipdData) {
-                  for (const ipdid in ipdData[pid]) {
-                    const rec = ipdData[pid][ipdid]
-                    const info = await fetchPatientInfo(pid)
-                    const bill = billingByPid[pid]?.[ipdid] || {}
-
-                    const payments: IPDPayment[] = []
-                    let netDep = 0
-                    let totalRe = 0
-                    if (bill.payments) {
-                      Object.values(bill.payments).forEach((p: any) => {
-                        payments.push(p)
-                        if (p.type === "advance") netDep += +p.amount
-                        else {
-                          netDep -= +p.amount
-                          totalRe += +p.amount
-                        }
-                      })
-                    }
-                    const services: IPDService[] = (bill.services || []).map((s: any) => ({
-                      amount: +s.amount || 0,
-                      serviceName: s.serviceName || "",
-                      type: s.type || "",
-                      doctorName: s.doctorName,
-                      createdAt: s.createdAt,
-                    }))
-                    const totalSvc = services.reduce((sum, s) => sum + s.amount, 0)
-                    const discountAmount = Number(bill.discount) || 0
-                    const remaining = totalSvc - discountAmount - netDep
-
-                    if (info) {
-                      tempIpd.push({
-                        id: `${pid}_${ipdid}`,
-                        patientId: pid,
-                        uhid: info.uhid,
-                        name: info.name,
-                        phone: info.phone,
-                        admissionDate: dateStr,
-                        admissionTime: rec.admissionTime,
-                        doctor: doctors[rec.doctor]?.name || "Unknown",
-                        doctorId: rec.doctor,
-                        roomType: rec.roomType,
-                        status: rec.status,
-                        services,
-                        totalAmount: totalSvc,
-                        totalDeposit: netDep,
-                        totalRefunds: totalRe,
-                        discount: discountAmount,
-                        payments,
-                        remainingAmount: remaining,
-                        createdAt: rec.createdAt,
-                        type: "IPD",
-                      })
-                    }
-                  }
-                }
-              }
-
-              // OT
-              if (otSnap.exists()) {
-                const otData = otSnap.val()
-                dateBytes += JSON.stringify(otData).length
-                for (const pid in otData) {
-                  for (const ipdid in otData[pid]) {
-                    const od = otData[pid][ipdid]
-                    const info = await fetchPatientInfo(pid)
-                    if (info) {
-                      tempOt.push({
-                        id: `${pid}_${ipdid}_${od.createdAt}`,
-                        patientId: pid,
-                        uhid: info.uhid,
-                        name: info.name,
-                        phone: info.phone,
-                        date: od.date || dateStr,
-                        time: od.time || "",
-                        message: od.message || "",
-                        createdAt: od.createdAt,
-                        ipdId: ipdid,
-                        type: "OT",
-                      })
-                    }
-                  }
-                }
-              }
-              setTotalDownloadedBytes((prev) => prev + dateBytes)
-            })(),
-          )
-          dt.setDate(dt.getDate() + 1)
-        }
-
-        await Promise.all(tasks)
-        setOpdAppointments(tempOpd)
-        setIpdAppointments(tempIpd)
-        setOtAppointments(tempOt)
-        setIsLoading(false)
+          })()
+        );
+        dt.setDate(dt.getDate() + 1);
       }
-    }
 
-    fetchAndListen()
-  }, [filters.searchQuery, currentDateRange, doctors, fetchPatientInfo, filters.filterType])
+      try {
+        await Promise.all(dailyFetchPromises);
+        // Using functional updates to ensure all concurrent updates are applied correctly
+        setOpdAppointments(prev => [...prev, ...tempOpd]);
+        setIpdAppointments(prev => [...prev, ...tempIpd]);
+        setOtAppointments(prev => [...prev, ...tempOt]);
+      } catch (err) {
+        console.error("Error fetching data for date range:", err);
+        toast.error("Failed to load data for the selected period.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchAppointments();
+  }, [filters.searchQuery, currentDateRange, doctors, filters.filterType]);
+
 
   // Statistics
   const statistics = useMemo(() => {
@@ -754,30 +582,30 @@ const DashboardPage: React.FC = () => {
   // Last 3 days chart
   const chartData = useMemo(() => {
     const today = getTodayDate()
-    const y = format(addDays(new Date(), -1), "yyyy-MM-dd")
-    const dby = format(addDays(new Date(), -2), "yyyy-MM-dd")
+    const yesterday = format(addDays(new Date(), -1), "yyyy-MM-dd")
+    const dayBeforeYesterday = format(addDays(new Date(), -2), "yyyy-MM-dd")
 
-    const opdCounts: Record<string, number> = { [dby]: 0, [y]: 0, [today]: 0 }
+    const opdCounts: Record<string, number> = { [dayBeforeYesterday]: 0, [yesterday]: 0, [today]: 0 }
     opdAppointments.forEach((a) => {
       if (opdCounts[a.date] !== undefined) opdCounts[a.date]++
     })
 
-    const ipdCounts: Record<string, number> = { [dby]: 0, [y]: 0, [today]: 0 }
+    const ipdCounts: Record<string, number> = { [dayBeforeYesterday]: 0, [yesterday]: 0, [today]: 0 }
     ipdAppointments.forEach((a) => {
       if (ipdCounts[a.admissionDate] !== undefined) ipdCounts[a.admissionDate]++
     })
 
     return {
-      labels: [dby, y, today],
+      labels: [dayBeforeYesterday, yesterday, today],
       datasets: [
         {
           label: "OPD Appointments",
-          data: [opdCounts[dby], opdCounts[y], opdCounts[today]],
+          data: [opdCounts[dayBeforeYesterday], opdCounts[yesterday], opdCounts[today]],
           backgroundColor: "rgba(54,162,235,0.6)",
         },
         {
           label: "IPD Admissions",
-          data: [ipdCounts[dby], ipdCounts[y], ipdCounts[today]],
+          data: [ipdCounts[dayBeforeYesterday], ipdCounts[yesterday], ipdCounts[today]],
           backgroundColor: "rgba(255,99,132,0.6)",
         },
       ],
@@ -809,6 +637,7 @@ const DashboardPage: React.FC = () => {
         startDate: "",
         endDate: "",
         selectedMonth: format(new Date(), "yyyy-MM"),
+        searchQuery: "", // Clear search query when changing filter type
       }))
     } else if (upd.filterType === "week") {
       setFilters((p) => ({
@@ -817,6 +646,7 @@ const DashboardPage: React.FC = () => {
         startDate: "",
         endDate: "",
         selectedMonth: format(new Date(), "yyyy-MM"),
+        searchQuery: "", // Clear search query
       }))
     } else if (upd.filterType === "month") {
       setFilters((p) => ({
@@ -825,6 +655,7 @@ const DashboardPage: React.FC = () => {
         startDate: "",
         endDate: "",
         selectedMonth: upd.selectedMonth || format(new Date(), "yyyy-MM"),
+        searchQuery: "", // Clear search query
       }))
     } else {
       setFilters((p) => ({ ...p, ...upd }))
@@ -844,15 +675,18 @@ const DashboardPage: React.FC = () => {
   const openModal = async (app: CombinedAppointment) => {
     setModalLoading(true)
     setIsModalOpen(true)
-    if (app.type === "IPD") {
+    // Only fetch additional IPD details if it's an IPD appointment and details are not already loaded
+    if (app.type === "IPD" && !(app as IPDAppointment).details) {
       try {
-        const [pid, ipdid] = app.id.split("_")
+        const [patientId, ipdId] = app.id.split("_") // app.id is patientId_ipdId
         const snap = await get(
-          ref(db, `patients/ipddetail/userdetailipd/${(app as IPDAppointment).admissionDate}/${pid}/${ipdid}`),
+          ref(db, `patients/ipddetail/userdetailipd/${(app as IPDAppointment).admissionDate}/${patientId}/${ipdId}`),
         )
         setSelectedAppointment({ ...app, details: snap.exists() ? snap.val() : null })
-      } catch {
-        setSelectedAppointment(app)
+      } catch (err) {
+        console.error("Error fetching IPD details:", err);
+        toast.error("Failed to load IPD details.");
+        setSelectedAppointment(app) // Still show basic info even if details fail
       }
     } else {
       setSelectedAppointment(app)
@@ -873,171 +707,178 @@ const DashboardPage: React.FC = () => {
 
       // Fetch appointments for the last year as a compromise for "all"
       const now = new Date()
-      const oneYearAgo = addDays(now, -365)
-      const dt = oneYearAgo
-      const endDt = now
+      const oneYearAgo = addDays(now, -365) // Fetch for past 365 days
+      let dtCursor = oneYearAgo; // Use dtCursor to iterate
 
-      const tasks: Promise<void>[] = []
+      const dailyPromises: Promise<void>[] = [];
 
-      while (dt <= endDt) {
-        const dateStr = format(dt, "yyyy-MM-dd")
-        tasks.push(
+      while (dtCursor <= now) {
+        const dateStr = format(dtCursor, "yyyy-MM-dd");
+        dailyPromises.push(
           (async () => {
-            const [opSnap, ipdInfoSnap, billingSnap, otSnap] = await Promise.all([
-              get(ref(db, `patients/opddetail/${dateStr}`)),
-              get(ref(db, `patients/ipddetail/userinfoipd/${dateStr}`)),
-              get(ref(db, `patients/ipddetail/userbillinginfoipd/${dateStr}`)),
-              get(ref(db, `patients/ot/${dateStr}`)),
-            ])
+            const [opdSnap, ipdInfoSnap, ipdBillingSnap, otSnap] = await Promise.all([
+              get(ref(db, `patients/opddetail/${dateStr}/${patientId}`)), // Query specific patient's data
+              get(ref(db, `patients/ipddetail/userinfoipd/${dateStr}/${patientId}`)), // Query specific patient's data
+              get(ref(db, `patients/ipddetail/userbillinginfoipd/${dateStr}/${patientId}`)), // Query specific patient's data
+              get(ref(db, `patients/ot/${dateStr}/${patientId}`)), // Query specific patient's data
+            ]);
 
             // OPD
-            if (opSnap.exists()) {
-              const data = opSnap.val()
-              for (const pid in data) {
-                if (pid === patientId) {
-                  for (const aid in data[pid]) {
-                    const ap = data[pid][aid]
-                    allPatientApps.push({
-                      id: `${pid}_${aid}`,
-                      patientId: pid,
-                      name: selectedPatientForAppointments?.name || "",
-                      phone: selectedPatientForAppointments?.phone || "",
-                      date: dateStr,
-                      time: ap.time || "",
-                      appointmentType: ap.appointmentType || "",
-                      createdAt: ap.createdAt,
-                      enteredBy: ap.enteredBy || "",
-                      message: ap.message || "",
-                      modalities: ap.modalities || [],
-                      opdType: ap.opdType || "",
-                      payment: ap.payment || {
-                        cashAmount: 0,
-                        createdAt: "",
-                        discount: 0,
-                        onlineAmount: 0,
-                        paymentMethod: "cash",
-                        totalCharges: 0,
-                        totalPaid: 0,
-                      },
-                      referredBy: ap.referredBy || "",
-                      study: ap.study || "",
-                      visitType: ap.visitType || "",
-                      type: "OPD",
-                    })
-                  }
-                }
+            if (opdSnap.exists()) {
+              const data = opdSnap.val();
+              for (const appId in data) {
+                const ap = data[appId];
+                allPatientApps.push({
+                  id: `${patientId}_${appId}`,
+                  patientId: patientId,
+                  name: ap.name || selectedPatientForAppointments?.name || "Unknown",
+                  phone: ap.phone || selectedPatientForAppointments?.phone || "N/A",
+                  date: dateStr,
+                  time: ap.time || "",
+                  appointmentType: ap.appointmentType || "",
+                  createdAt: ap.createdAt,
+                  enteredBy: ap.enteredBy || "",
+                  message: ap.message || "",
+                  modalities: ap.modalities || [],
+                  opdType: ap.opdType || "",
+                  payment: ap.payment || {
+                    cashAmount: 0,
+                    createdAt: "",
+                    discount: 0,
+                    onlineAmount: 0,
+                    paymentMethod: "cash",
+                    totalCharges: 0,
+                    totalPaid: 0,
+                  },
+                  referredBy: ap.referredBy || "",
+                  study: ap.study || "",
+                  visitType: ap.visitType || "",
+                  type: "OPD",
+                });
               }
             }
 
             // IPD
-            const billingByPid: Record<string, any> = billingSnap.exists() ? billingSnap.val() : {}
+            const billingDataForPatient = ipdBillingSnap.exists() ? ipdBillingSnap.val() : {};
             if (ipdInfoSnap.exists()) {
-              const ipdData = ipdInfoSnap.val()
-              for (const pid in ipdData) {
-                if (pid === patientId) {
-                  for (const ipdid in ipdData[pid]) {
-                    const rec = ipdData[pid][ipdid]
-                    const bill = billingByPid[pid]?.[ipdid] || {}
+              const ipdDataForPatient = ipdInfoSnap.val();
+              for (const ipdId in ipdDataForPatient) {
+                const rec = ipdDataForPatient[ipdId];
+                const bill = billingDataForPatient[ipdId] || {};
 
-                    const payments: IPDPayment[] = []
-                    let netDep = 0
-                    let totalRe = 0
-                    if (bill.payments) {
-                      Object.values(bill.payments).forEach((p: any) => {
-                        payments.push(p)
-                        if (p.type === "advance") netDep += +p.amount
-                        else {
-                          netDep -= +p.amount
-                          totalRe += +p.amount
-                        }
-                      })
+                const payments: IPDPayment[] = [];
+                let netDep = 0;
+                let totalRe = 0;
+                if (bill.payments) {
+                  Object.values(bill.payments).forEach((p: any) => {
+                    payments.push(p);
+                    if (p.type === "advance") netDep += +p.amount;
+                    else {
+                      netDep -= +p.amount;
+                      totalRe += +p.amount;
                     }
-                    const services: IPDService[] = (bill.services || []).map((s: any) => ({
-                      amount: +s.amount || 0,
-                      serviceName: s.serviceName || "",
-                      type: s.type || "",
-                      doctorName: s.doctorName,
-                      createdAt: s.createdAt,
-                    }))
-                    const totalSvc = services.reduce((sum, s) => sum + s.amount, 0)
-                    const discountAmount = Number(bill.discount) || 0
-                    const remaining = totalSvc - discountAmount - netDep
-
-                    allPatientApps.push({
-                      id: `${pid}_${ipdid}`,
-                      patientId: pid,
-                      uhid: selectedPatientForAppointments?.uhid || "",
-                      name: selectedPatientForAppointments?.name || "",
-                      phone: selectedPatientForAppointments?.phone || "",
-                      admissionDate: dateStr,
-                      admissionTime: rec.admissionTime,
-                      doctor: doctors[rec.doctor]?.name || "Unknown",
-                      doctorId: rec.doctor,
-                      roomType: rec.roomType,
-                      status: rec.status,
-                      services,
-                      totalAmount: totalSvc,
-                      totalDeposit: netDep,
-                      totalRefunds: totalRe,
-                      discount: discountAmount,
-                      payments,
-                      remainingAmount: remaining,
-                      createdAt: rec.createdAt,
-                      type: "IPD",
-                    })
-                  }
+                  });
                 }
+                const services: IPDService[] = (bill.services || []).map((s: any) => ({
+                  amount: +s.amount || 0,
+                  serviceName: s.serviceName || "",
+                  type: s.type || "",
+                  doctorName: s.doctorName,
+                  createdAt: s.createdAt,
+                }));
+                const totalSvc = services.reduce((sum, s) => sum + s.amount, 0);
+                const discountAmount = Number(bill.discount) || 0;
+                const remaining = totalSvc - discountAmount - netDep;
+
+                allPatientApps.push({
+                  id: `${patientId}_${ipdId}`,
+                  patientId: patientId,
+                  uhid: rec.uhid || patientId,
+                  name: rec.name || selectedPatientForAppointments?.name || "Unknown",
+                  phone: rec.phone || selectedPatientForAppointments?.phone || "N/A",
+                  admissionDate: dateStr,
+                  admissionTime: rec.admissionTime,
+                  doctor: doctors[rec.doctor]?.name || "Unknown",
+                  doctorId: rec.doctor,
+                  roomType: rec.roomType,
+                  status: rec.status,
+                  services,
+                  totalAmount: totalSvc,
+                  totalDeposit: netDep,
+                  totalRefunds: totalRe,
+                  discount: discountAmount,
+                  payments,
+                  remainingAmount: remaining,
+                  createdAt: rec.createdAt,
+                  type: "IPD",
+                });
               }
             }
 
             // OT
             if (otSnap.exists()) {
-              const otData = otSnap.val()
-              for (const pid in otData) {
-                if (pid === patientId) {
-                  for (const ipdid in otData[pid]) {
-                    const od = otData[pid][ipdid]
-                    allPatientApps.push({
-                      id: `${pid}_${ipdid}_${od.createdAt}`,
-                      patientId: pid,
-                      uhid: selectedPatientForAppointments?.uhid || "",
-                      name: selectedPatientForAppointments?.name || "",
-                      phone: selectedPatientForAppointments?.phone || "",
-                      date: od.date || dateStr,
-                      time: od.time || "",
-                      message: od.message || "",
-                      createdAt: od.createdAt,
-                      ipdId: ipdid,
-                      type: "OT",
-                    })
-                  }
-                }
+              const otDataForPatient = otSnap.val();
+              for (const otUniqueId in otDataForPatient) { // This is the unique OT entry ID for this patient/date
+                const od = otDataForPatient[otUniqueId];
+                allPatientApps.push({
+                  id: `${patientId}_${otUniqueId}_${od.createdAt}`,
+                  patientId: patientId,
+                  uhid: od.uhid || patientId,
+                  name: od.name || selectedPatientForAppointments?.name || "Unknown",
+                  phone: od.phone || selectedPatientForAppointments?.phone || "N/A",
+                  date: od.date || dateStr,
+                  time: od.time || "",
+                  message: od.message || "",
+                  createdAt: od.createdAt,
+                  ipdId: otUniqueId, // This should be the actual OT ID here
+                  type: "OT",
+                });
               }
             }
-          })(),
-        )
-        dt.setDate(dt.getDate() + 1)
+          })()
+        );
+        dtCursor = addDays(dtCursor, 1);
       }
 
-      await Promise.all(tasks)
+      try {
+        await Promise.all(dailyPromises);
 
-      setPatientAllAppointments(
-        allPatientApps.sort((a, b) => {
-          const dateA = new Date(a.type === "IPD" ? (a as IPDAppointment).admissionDate : a.date)
-          const dateB = new Date(b.type === "IPD" ? (b as IPDAppointment).admissionDate : b.date)
-          return dateB.getTime() - dateA.getTime() // Sort by most recent first
-        }),
-      )
+        setPatientAllAppointments(
+          allPatientApps.sort((a, b) => {
+            const dateA = new Date(a.type === "IPD" ? (a as IPDAppointment).admissionDate : a.date);
+            const dateB = new Date(b.type === "IPD" ? (b as IPDAppointment).admissionDate : b.date);
+            // Fallback to createdAt if date is same or invalid, or time
+            const timeA = a.type === "IPD" ? (a as IPDAppointment).admissionTime : a.time;
+            const timeB = b.type === "IPD" ? (b as IPDAppointment).admissionTime : b.time;
+            const createdA = new Date(a.createdAt).getTime();
+            const createdB = new Date(b.createdAt).getTime();
 
-      setPatientAppointmentsLoading(false)
+            if (dateA.getTime() === dateB.getTime()) {
+                if (timeA && timeB) {
+                    // Simple string comparison for time if format is consistent (HH:MM)
+                    return timeB.localeCompare(timeA);
+                }
+                return createdB - createdA; // Fallback to creation time
+            }
+            return dateB.getTime() - dateA.getTime(); // Sort by most recent date first
+          }),
+        );
+      } catch (err) {
+        console.error("Error fetching patient's appointments:", err);
+        toast.error("Failed to load patient's appointments.");
+        setPatientAllAppointments([]);
+      } finally {
+        setPatientAppointmentsLoading(false);
+      }
     },
-    [selectedPatientForAppointments, doctors],
-  )
+    [doctors, selectedPatientForAppointments], // Include selectedPatientForAppointments in deps
+  );
 
   // New: Open modal for patient's appointments
   const openPatientAppointmentsModal = async (patient: PatientInfo) => {
     setSelectedPatientForAppointments(patient)
     setPatientAppointmentsModalOpen(true)
+    // No await here, let the modal show loading state
     await fetchAllAppointmentsForPatient(patient.uhid)
   }
 
@@ -1070,6 +911,7 @@ const DashboardPage: React.FC = () => {
       case "dateRange":
         if (!filters.startDate || !filters.endDate) return "Select date range"
         return `${format(new Date(filters.startDate), "MMM dd")} - ${format(new Date(filters.endDate), "MMM dd, yyyy")}`
+      case "week":
       default:
         const { start, end } = currentDateRange
         return `Week: ${format(new Date(start), "MMM dd")} - ${format(new Date(end), "MMM dd, yyyy")}`
@@ -1082,11 +924,17 @@ const DashboardPage: React.FC = () => {
       casualty: mods.filter((m) => m.type === "casualty").length,
       xray: mods.filter((m) => m.type === "xray").length,
       custom: mods.filter((m) => m.type === "custom").length,
+      pathology: mods.filter((m) => m.type === "pathology").length,
+      radiology: mods.filter((m) => m.type === "radiology").length,
+      ipd: mods.filter((m) => m.type === "ipd").length, // This seems unusual for OPD modalities
     }
     const parts: string[] = []
     if (counts.consultation) parts.push(`${counts.consultation} Consultation${counts.consultation > 1 ? "s" : ""}`)
     if (counts.casualty) parts.push(`${counts.casualty} Casualty`)
     if (counts.xray) parts.push(`${counts.xray} X-ray${counts.xray > 1 ? "s" : ""}`)
+    if (counts.pathology) parts.push(`${counts.pathology} Pathology`)
+    if (counts.radiology) parts.push(`${counts.radiology} Radiology`)
+    if (counts.ipd) parts.push(`${counts.ipd} IPD Service${counts.ipd > 1 ? "s" : ""}`)
     if (counts.custom) parts.push(`${counts.custom} Custom Service${counts.custom > 1 ? "s" : ""}`)
     return parts.join(", ") || "No services"
   }
@@ -1111,12 +959,12 @@ const DashboardPage: React.FC = () => {
                 <Search className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
                 <input
                   type="text"
-                  placeholder="Search by name, phone, or UHID"
+                  placeholder="Search by name, phone, or UHID (min 3 chars)"
                   value={filters.searchQuery}
-                  onChange={(e) => handleFilterChange({ searchQuery: e.target.value })}
+                  onChange={(e) => setFilters((p) => ({ ...p, searchQuery: e.target.value }))}
                   className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition shadow-sm"
                 />
-                {filters.searchQuery.length >= 6 && searchDownloadedBytes > 0 && (
+                {filters.searchQuery.length >= 3 && searchDownloadedBytes > 0 && (
                   <p className="absolute -bottom-5 right-0 text-xs text-gray-500">
                     Downloaded: {formatBytes(searchDownloadedBytes)}
                   </p>
@@ -1735,7 +1583,7 @@ const DashboardPage: React.FC = () => {
                           )}
                           {selectedAppointment.type === "OT" && (
                             <div>
-                              <p className="text-sm text-gray-500">IPD ID</p>
+                              <p className="text-sm text-gray-500">IPD ID (for OT)</p>
                               <p className="font-medium">{(selectedAppointment as OTAppointment).ipdId}</p>
                             </div>
                           )}
@@ -1783,6 +1631,9 @@ const DashboardPage: React.FC = () => {
                               {(selectedAppointment as OPDAppointment).payment.discount > 0 && (
                                 <div>
                                   <p className="text-sm text-gray-500">Discount</p>
+                                  <p className="font-medium text-red-600">
+                                    {formatCurrency((selectedAppointment as OPDAppointment).payment.discount)}
+                                  </p>
                                 </div>
                               )}
                             </div>
