@@ -321,7 +321,7 @@ const DashboardPage: React.FC = () => {
       const tempOpd: OPDAppointment[] = []
       const tempIpd: IPDAppointment[] = []
       const tempOt: OTAppointment[] = []
-      let totalBytesForPeriod = 0;
+      const totalBytesForPeriod = 0;
 
       const dt = new Date(start)
       const endDt = new Date(end)
