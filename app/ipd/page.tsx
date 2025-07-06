@@ -8,7 +8,7 @@ import { useForm, type SubmitHandler, Controller } from "react-hook-form"
 
 import { db } from "@/lib/firebase" // Gautami DB
 
-import { ref, push, update, onValue, set } from "firebase/database"
+import { ref, push, update, onValue, set, runTransaction, } from "firebase/database"
 
 import Head from "next/head"
 
@@ -194,7 +194,6 @@ const AdmissionSourceOptions = [
 
   { value: "referral", label: "Referral" },
 ]
-
 const RoomTypeOptions = [
   { value: "female_general_ward", label: "Female General Ward" },
 
@@ -218,7 +217,6 @@ const RoomTypeOptions = [
 
   { value: "deluxe_room", label: "Deluxe room" },
 ]
-
 function formatAMPM(date: Date): string {
   let hours = date.getHours()
 
@@ -793,269 +791,192 @@ const IPDBookingPage: React.FC = () => {
 
   // Update onSubmit logic to handle UHID and Age Unit
 
+  async function updateIpdSummary(dateKey: string, deposit: number, paymentMode: string) {
+    const summaryRef = ref(db, `summary/ipd/${dateKey}`)
+    await runTransaction(summaryRef, (current) => {
+      const newSummary = {
+        totalAdmissions: (current?.totalAdmissions || 0) + 1,
+        totalDeposit: (current?.totalDeposit || 0) + (deposit || 0),
+        cash: (current?.cash || 0),
+        online: (current?.online || 0),
+      }
+      if (deposit && paymentMode === "cash") newSummary.cash += deposit
+      if (deposit && paymentMode === "online") newSummary.online += deposit
+      return newSummary
+    })
+  }
+
   const onSubmit: SubmitHandler<IPDFormInput> = async (data) => {
     setLoading(true)
-
     try {
       // 1. Occupy the selected bed
-
       if (data.roomType?.value && data.bed?.value) {
         const bedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`)
-
         await update(bedRef, { status: "Occupied" })
       }
-
+  
       // 2. Generate or use existing patient ID (UHID)
-
       let patientId: string
-
       let patientUHID: string
-
       const currentTime = new Date().toISOString()
-
+  
       if (selectedPatient) {
         patientId = selectedPatient.id
-
-        patientUHID = selectedPatient.data.uhid || patientId // Use existing UHID
-
+        patientUHID = selectedPatient.data.uhid || patientId
         await update(ref(db, `patients/patientinfo/${patientId}`), {
           name: data.name,
-
           phone: data.phone,
-
           gender: data.gender?.value || "",
-
           age: data.age,
-
-          ageUnit: data.ageUnit?.value || "years", // ADDED: Save age unit
-
+          ageUnit: data.ageUnit?.value || "years",
           address: data.address || "",
-
           updatedAt: currentTime,
-
-          uhid: patientUHID, // Ensure UHID is updated/preserved
+          uhid: patientUHID,
         })
       } else {
-        patientUHID = await generateNextUHID() // Generate new UHID here
-
-        patientId = patientUHID // Use UHID as patientId for new patients
-
+        patientUHID = await generateNextUHID()
+        patientId = patientUHID
         await set(ref(db, `patients/patientinfo/${patientId}`), {
           name: data.name,
-
           phone: data.phone,
-
           gender: data.gender?.value || "",
-
           age: data.age,
-
-          ageUnit: data.ageUnit?.value || "years", // ADDED: Set age unit for new patient
-
+          ageUnit: data.ageUnit?.value || "years",
           address: data.address || "",
-
           createdAt: currentTime,
-
           updatedAt: currentTime,
-
-          uhid: patientUHID, // Set UHID for new patient
+          uhid: patientUHID,
         })
       }
-
+  
       // 3. Prepare split data
-
       const ipdData = {
         phone: data.phone,
-
-        uhid: patientUHID, // Use the determined UHID
-
+        uhid: patientUHID,
         name: data.name,
-
-        // Relative info
-
         relativeName: data.relativeName,
-
         relativePhone: data.relativePhone,
-
         relativeAddress: data.relativeAddress || "",
-
-        // IPD
-
         admissionDate: data.date.toISOString(),
-
         admissionTime: data.time,
-
         roomType: data.roomType?.value || "",
-
         bed: data.bed?.value || "",
-
         doctor: data.doctor?.value || "",
-
         referDoctor: data.referDoctor || "",
-
         admissionType: data.admissionType?.value || "",
-
         admissionSource: data.admissionSource?.value || "",
-
         createdAt: currentTime,
-
         status: "active",
       }
-
+  
       // Date Key for the node
-
       const dateKey = getMumbaiDateKey(data.date instanceof Date ? data.date : new Date(data.date))
-
+  
       // 1. Push to userinfoipd (returns new ipdId)
-
       const ipdRef = push(ref(db, `patients/ipddetail/userinfoipd/${dateKey}/${patientId}`))
-
       const ipdId = ipdRef.key as string
-
       await set(ipdRef, ipdData)
-
+  
       // 2. If deposit, push to userbillinginfoipd
-
       if (data.deposit && data.deposit > 0) {
         const billingData = {
           patientId,
-
-          uhid: patientUHID, // Use the determined UHID
-
+          uhid: patientUHID,
           ipdId,
-
           totalDeposit: data.deposit,
-
           paymentMode: data.paymentMode?.value || "",
-
           createdAt: currentTime,
         }
-
-        // Save billing info under userbillinginfoipd
-
+        // Save billing info
         await set(ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}`), billingData)
-
         // Add payment entry as a list under userbillinginfoipd/payments
-
         const paymentRef = push(
           ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}/payments`),
         )
-
         await set(paymentRef, {
           amount: data.deposit,
-
           date: currentTime,
-
           paymentType: data.paymentMode?.value || "",
-
           type: "advance",
-
           createdAt: currentTime,
         })
+  
+        // --- Update summary with deposit and payment mode ---
+        await updateIpdSummary(
+          dateKey,
+          Number(data.deposit),
+          data.paymentMode?.value || "cash"
+        )
+      } else {
+        // If no deposit, update only admissions count
+        await runTransaction(ref(db, `summary/ipd/${dateKey}`), (current) => ({
+          totalAdmissions: (current?.totalAdmissions || 0) + 1,
+          totalDeposit: (current?.totalDeposit || 0),
+          cash: (current?.cash || 0),
+          online: (current?.online || 0),
+        }))
       }
-
+  
       // 3. Add IPD to active list for quick lookup
-
       const ipdActiveData = {
         ipdId,
-
         patientId,
-
         name: data.name,
-
         ward: data.roomType?.label || data.roomType?.value || "",
-
         phone: data.phone,
-
         advanceDeposit: data.deposit || 0,
-
         admitDate: ipdData.admissionDate,
-
         bed: data.bed?.label || "",
-
-        uhid: patientUHID, // Add UHID to active list
+        uhid: patientUHID,
       }
-
       await set(ref(db, `patients/ipdactive/${ipdId}`), ipdActiveData)
-
+  
       // 4. Send WhatsApp
-
-      const patientMessage = ` Dear ${data.name}, your IPD admission appointment is confirmed. Your bed: ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"} has been allocated. Your UHID is ${patientUHID}. Thank you for choosing our hospital.`
-
+      const patientMessage = `Dear ${data.name}, your IPD admission appointment is confirmed. Your bed: ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"} has been allocated. Your UHID is ${patientUHID}. Thank you for choosing our hospital.`
       const relativeMessage = ` Dear ${data.relativeName}, this is to inform you that the IPD admission for ${data.name} (UHID: ${patientUHID}) has been scheduled. The allocated bed is ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"}. Please contact us for further details.`
-
       await sendWhatsAppMessage(data.phone, patientMessage)
-
       await sendWhatsAppMessage(data.relativePhone, relativeMessage)
-
+  
       toast.success("IPD Admission created successfully!", {
         position: "top-right",
-
         autoClose: 5000,
       })
-
+  
       // 5. Auto-download Letterhead
-
       generateAndDownloadEnglishLetterhead(data, patientUHID)
-
+  
       // 6. Reset Form
-
       reset({
         name: "",
-
         phone: "",
-
         gender: null,
-
         age: 0,
-
-        ageUnit: AgeUnitOptions.find((opt) => opt.value === "years") || null, // Reset age unit
-
+        ageUnit: AgeUnitOptions.find((opt) => opt.value === "years") || null,
         address: "",
-
         relativeName: "",
-
         relativePhone: "",
-
         relativeAddress: "",
-
         date: new Date(),
-
         time: formatAMPM(new Date()),
-
         roomType: null,
-
         bed: null,
-
         doctor: null,
-
         referDoctor: "",
-
         admissionType: null,
-
         admissionSource: AdmissionSourceOptions.find((opt) => opt.value === "opd") || null,
-
         deposit: 0,
-
         paymentMode: PaymentModeOptions[0],
       })
-
       setPatientNameInput("")
-
       setPatientPhoneInput("")
-
       setSelectedPatient(null)
-
       setPreviewData(null)
-
-      setUhidSearchTerm("") // ADDED: Reset UHID search term
-
-      setDisplayUHID("") // Reset displayUHID to empty for next booking
+      setUhidSearchTerm("")
+      setDisplayUHID("")
     } catch (err) {
       console.error("Error in IPD booking:", err)
-
       toast.error("Error: Failed to book IPD admission.", {
         position: "top-right",
-
         autoClose: 5000,
       })
     } finally {

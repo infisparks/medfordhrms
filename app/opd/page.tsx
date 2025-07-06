@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { db, auth } from "@/lib/firebase"
-import { ref, push, update, onValue, set, remove } from "firebase/database"
+import { ref, push, update, onValue, set, remove, runTransaction } from "firebase/database"
 import { onAuthStateChanged } from "firebase/auth"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
@@ -18,7 +18,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { generateNextUHID } from "@/components/uhid-generator"
 import { CheckCircle, User, Clock, Hospital, PhoneCall } from "lucide-react"
 import Head from "next/head"
-// ----------- Import the utility PDF function -------------
 import { openBillInNewTabProgrammatically } from "@/app/edit-appointment/bill-generator"
 
 function formatAMPM(date: Date): string {
@@ -30,7 +29,6 @@ function formatAMPM(date: Date): string {
   return `${hours}:${minutesStr} ${ampm}`
 }
 
-// WhatsApp message sending function
 async function sendWhatsAppMessage(phone: string, message: string): Promise<boolean> {
   try {
     const phoneWithCountryCode = `91${phone.replace(/\D/g, "")}`
@@ -49,7 +47,6 @@ async function sendWhatsAppMessage(phone: string, message: string): Promise<bool
   }
 }
 
-// Generate professional WhatsApp messages function
 function generateAppointmentMessage(data: IFormInput, uhid: string, appointmentType: "hospital" | "oncall"): string {
   const appointmentDate = data.date.toLocaleDateString("en-IN", {
     weekday: "long",
@@ -70,7 +67,7 @@ ${data.referredBy ? `• Referred By: ${data.referredBy}` : ""}
 ${data.message ? `📝 *Notes:* ${data.message}` : ""}
 For any queries, please contact our reception.
 Thank you for choosing our healthcare services!
-* Medford Hospital *`
+* G-Medford-NX Hospital *`
   } else {
     const modalities = data.modalities || []
     const servicesText = modalities
@@ -123,7 +120,7 @@ export default function Page() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [activeTab, setActiveTab] = useState("booking")
-  const [lastUhid, setLastUhid] = useState<string | null>(null) // <-- added for UHID display
+  const [lastUhid, setLastUhid] = useState<string | null>(null)
 
   const form = useForm<IFormInput>({
     defaultValues: {
@@ -261,7 +258,7 @@ export default function Page() {
     try {
       // Determine UHID
       const uhid = selectedPatient?.id || (await generateNextUHID())
-      setLastUhid(uhid) // <-- store last used UHID to show on success
+      setLastUhid(uhid)
       if (!selectedPatient) {
         await set(ref(db, `patients/patientinfo/${uhid}`), {
           name: data.name,
@@ -357,6 +354,29 @@ export default function Page() {
             createdAt: new Date().toISOString(),
           })
         }
+
+        // ----------------- OPD SUMMARY NODE UPDATE START -----------------
+        const summaryRef = ref(db, `summary/opd/${appointmentDateKey}`)
+        await runTransaction(summaryRef, (current) => {
+          if (current === null) {
+            return {
+              totalCount: 1,
+              totalRevenue: cash + online,
+              cash: cash,
+              online: online,
+              discount: discount,
+            }
+          }
+          return {
+            totalCount: (current.totalCount || 0) + 1,
+            totalRevenue: (current.totalRevenue || 0) + cash + online,
+            cash: (current.cash || 0) + cash,
+            online: (current.online || 0) + online,
+            discount: (current.discount || 0) + discount,
+          }
+        })
+        // ----------------- OPD SUMMARY NODE UPDATE END -----------------
+
         const professionalMessage = generateAppointmentMessage(data, uhid, "hospital")
         await sendWhatsAppMessage(data.phone, professionalMessage)
       }
@@ -364,10 +384,9 @@ export default function Page() {
       // ---------------- AUTO OPEN BILL PDF in new tab ------------------
       await openBillInNewTabProgrammatically(
         { ...data, date: data.date },
-        uhid, // Always pass the generated or selected UHID here
+        uhid,
         doctors.map((d) => ({ id: d.id, name: d.name }))
       )
-      
 
       setIsSubmitted(true)
       setTimeout(() => {
@@ -397,7 +416,7 @@ export default function Page() {
         })
         setSelectedPatient(null)
         setUhidSearchInput("")
-        setLastUhid(null) // Clear UHID after reset if you want
+        setLastUhid(null)
       }, 3000)
     } catch (err) {
       console.error(err)
@@ -418,7 +437,6 @@ export default function Page() {
   }
 
   const handleBookOPDVisit = (appointment: OnCallAppointment) => {
-    // Pre-fill the form with on-call appointment data
     setValue("name", appointment.name)
     setValue("phone", appointment.phone)
     setValue("age", appointment.age)
@@ -428,18 +446,16 @@ export default function Page() {
     setValue("time", appointment.time)
     setValue("message", appointment.message || "")
     setValue("referredBy", appointment.referredBy || "")
-    // Switch to booking tab
     setActiveTab("booking")
     toast.info("Patient information pre-filled. Please select services and payment details.")
   }
 
   const handleBookOnCall = () => {
-    // Reset form and set to on-call
     reset({
       name: "",
       phone: "",
       age: undefined,
-      ageUnit: "years", // Reset age unit
+      ageUnit: "years",
       gender: "",
       address: "",
       date: new Date(),
@@ -459,7 +475,7 @@ export default function Page() {
       referredBy: "",
     })
     setSelectedPatient(null)
-    setUhidSearchInput("") // Clear UHID search input on form reset
+    setUhidSearchInput("")
     setActiveTab("booking")
   }
 

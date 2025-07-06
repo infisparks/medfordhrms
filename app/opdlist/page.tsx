@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import { db } from "@/lib/firebase"
 import { format } from "date-fns"
-import { ref, get, remove, onChildAdded, onChildChanged, onChildRemoved, off, query, orderByChild, equalTo, startAt, endAt } from "firebase/database"
+import { ref, get, remove, onChildAdded, onChildChanged, onChildRemoved, off, query, orderByChild, equalTo, startAt, endAt, runTransaction } from "firebase/database"
 import { useRouter } from "next/navigation"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -523,6 +523,41 @@ export default function ManageOPDPage() {
     try {
       const { patientId, id: appointmentId, date, appointmentType } = appointmentToDelete
       const dateKey = format(new Date(date), "yyyy-MM-dd")
+      const paymentRef = ref(db, `patients/opddetail/${dateKey}/${patientId}/${appointmentId}/payment`)
+      let oldCash = 0, oldOnline = 0, oldDiscount = 0
+  
+      // 1. Fetch payment info first
+      const paymentSnap = await get(paymentRef)
+      if (paymentSnap.exists()) {
+        const oldPayment = paymentSnap.val()
+        oldCash = Number(oldPayment.cashAmount) || 0
+        oldOnline = Number(oldPayment.onlineAmount) || 0
+        oldDiscount = Number(oldPayment.discount) || 0
+      } else {
+        // Fallback: try to get from appointmentToDelete
+        oldCash = appointmentToDelete.payment?.paymentMethod === "cash"
+          ? Number(appointmentToDelete.payment?.totalPaid) || 0
+          : 0
+        oldOnline = appointmentToDelete.payment?.paymentMethod === "online"
+          ? Number(appointmentToDelete.payment?.totalPaid) || 0
+          : 0
+        oldDiscount = Number(appointmentToDelete.payment?.discount) || 0
+      }
+  
+      // 2. Update summary node for this date
+      const summaryRef = ref(db, `summary/opd/${dateKey}`)
+      await runTransaction(summaryRef, (current: { totalCount: any; totalRevenue: any; cash: any; online: any; discount: any }) => {
+        if (!current) return current // nothing to do
+        return {
+          totalCount: (current.totalCount || 1) > 0 ? (current.totalCount || 1) - 1 : 0,
+          totalRevenue: (current.totalRevenue || 0) - oldCash - oldOnline,
+          cash: (current.cash || 0) - oldCash,
+          online: (current.online || 0) - oldOnline,
+          discount: (current.discount || 0) - oldDiscount,
+        }
+      })
+  
+      // 3. Now actually remove
       await remove(ref(db, `patients/opddetail/${dateKey}/${patientId}/${appointmentId}`))
       if (appointmentType === "oncall") {
         await remove(ref(db, `oncall-appointments/${appointmentId}`))
@@ -532,7 +567,6 @@ export default function ManageOPDPage() {
       setAppointmentToDelete(null)
       setDeletePassword("")
       setDeleteError("")
-      // Optionally refresh today list
       setAppointments((prev: Appointment[]) => prev.filter(a => !(a.patientId === patientId && a.id === appointmentId)))
     } catch (error) {
       toast.error("Failed to cancel appointment.", { position: "top-right", autoClose: 5000 })
@@ -541,7 +575,7 @@ export default function ManageOPDPage() {
       setDeleting(false)
     }
   }
-
+  
   return (
     <TooltipProvider>
       <div className="min-h-screen bg-slate-50">

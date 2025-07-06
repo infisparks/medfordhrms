@@ -3,16 +3,14 @@
 import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { db, auth } from "@/lib/firebase"
-import { ref, get, update, push, set } from "firebase/database"
+import { ref, get, update, push, set, runTransaction } from "firebase/database"
 import { onAuthStateChanged } from "firebase/auth"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
 import { ArrowLeft, Save, User, Clock, AlertCircle } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
-
 import { EditAppointmentForm } from "./edit-appointment-form"
 import type { IFormInput, Doctor, ModalitySelection } from "../opd/types"
-
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -31,21 +29,21 @@ export default function EditAppointmentPage() {
   const searchParams = useSearchParams()
   const uhid = searchParams.get("uhid")
   const appointmentId = searchParams.get("id")
-  const urlDate = searchParams.get("date") // try to get date from query
+  const urlDate = searchParams.get("date")
 
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null)
   const [doctors, setDoctors] = useState<Doctor[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [dateKey, setDateKey] = useState<string | null>(urlDate) // Track the dateKey for correct node
+  const [dateKey, setDateKey] = useState<string | null>(urlDate)
 
   const form = useForm<IFormInput>({
     defaultValues: {
       name: "",
       phone: "",
-      age: undefined, // Changed to undefined for optional number
-      ageUnit: "years", // Added default age unit
+      age: undefined,
+      ageUnit: "years",
       gender: "",
       address: "",
       date: new Date(),
@@ -146,7 +144,6 @@ export default function EditAppointmentPage() {
             return
           }
           const opdData = opdSnap.val()
-          // Scan all dates to find this UHID/ID combo
           for (const dateK of Object.keys(opdData)) {
             const uhidData = opdData[dateK]?.[uhid]
             if (uhidData && uhidData[appointmentId]) {
@@ -207,7 +204,7 @@ export default function EditAppointmentPage() {
           name: appointmentData.name || patientData.name || "",
           phone: appointmentData.phone || patientData.phone || "",
           age: Number(patientData.age ?? appointmentData.age ?? undefined),
-          ageUnit: patientData.ageUnit || appointmentData.ageUnit || "years", // Load age unit
+          ageUnit: patientData.ageUnit || appointmentData.ageUnit || "years",
           gender: patientData.gender || appointmentData.gender || "",
           address: patientData.address || appointmentData.address || "",
           date: new Date(appointmentData.date),
@@ -251,12 +248,37 @@ export default function EditAppointmentPage() {
       const totalCharges = data.modalities.reduce((total, modality) => total + modality.charges, 0)
       const totalPaid = cash + online
 
+      // --- SUMMARY UPDATE LOGIC: BEGIN ---
+      // Get old payment info
+      let oldCash = 0, oldOnline = 0, oldDiscount = 0
+      const paymentRef = ref(db, `patients/opddetail/${dateKey}/${uhid}/${appointmentId}/payment`)
+      const paymentSnap = await get(paymentRef)
+      if (paymentSnap.exists()) {
+        const oldPayment = paymentSnap.val()
+        oldCash = Number(oldPayment.cashAmount) || 0
+        oldOnline = Number(oldPayment.onlineAmount) || 0
+        oldDiscount = Number(oldPayment.discount) || 0
+      }
+      // Update summary node atomically
+      const summaryRef = ref(db, `summary/opd/${dateKey}`)
+      await runTransaction(summaryRef, (current) => {
+        if (current == null) return current // Do nothing if missing
+        return {
+          totalCount: current.totalCount || 0,
+          totalRevenue: (current.totalRevenue || 0) - oldCash - oldOnline + cash + online,
+          cash: (current.cash || 0) - oldCash + cash,
+          online: (current.online || 0) - oldOnline + online,
+          discount: (current.discount || 0) - oldDiscount + discount,
+        }
+      })
+      // --- SUMMARY UPDATE LOGIC: END ---
+
       // Update patient info
       await update(ref(db, `patients/patientinfo/${uhid}`), {
         name: data.name,
         phone: data.phone,
         age: data.age,
-        ageUnit: data.ageUnit, // Save age unit
+        ageUnit: data.ageUnit,
         gender: data.gender,
         address: data.address,
         updatedAt: new Date().toISOString(),
@@ -337,6 +359,8 @@ export default function EditAppointmentPage() {
       setIsSaving(false)
     }
   }
+
+  // ...rest of your component as before (no changes below this line)...
 
   if (isLoading) {
     return (

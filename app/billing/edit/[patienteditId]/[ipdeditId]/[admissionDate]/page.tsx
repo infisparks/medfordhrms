@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useForm, Controller } from "react-hook-form"
-import { ref, onValue, update, push, set, get } from "firebase/database" // Added 'get'
+import { ref, onValue, update, push, set, get, runTransaction } from "firebase/database" // Added 'get'
 import { db, auth } from "@/lib/firebase"
 import { onAuthStateChanged } from "firebase/auth"
 import Select from "react-select"
@@ -82,6 +82,8 @@ interface IPDRecord {
 }
 
 interface BillingRecord {
+  paymentMode: string
+  
   totalDeposit: number
 }
 
@@ -332,7 +334,7 @@ export default function EditIPDPage() {
     )
     const unsubscribe = onValue(billingRef, (snapshot) => {
       if (!snapshot.exists()) {
-        setOriginalBilling({ totalDeposit: 0 })
+        setOriginalBilling({ totalDeposit: 0, paymentMode: PaymentModeOptions[0].value })
         setValue("deposit", 0)
         setValue("paymentMode", PaymentModeOptions[0])
         return
@@ -504,6 +506,41 @@ export default function EditIPDPage() {
     return changes
   }
 
+  async function adjustIpdSummaryOnEdit({
+    dateKey,
+    oldDeposit,
+    newDeposit,
+    oldPaymentMode,
+    newPaymentMode,
+  }: {
+    dateKey: string
+    oldDeposit: number
+    newDeposit: number
+    oldPaymentMode: string
+    newPaymentMode: string
+  }) {
+    const summaryRef = ref(db, `summary/ipd/${dateKey}`)
+    await runTransaction(summaryRef, (summary) => {
+      const s = summary || { totalAdmissions: 0, totalDeposit: 0, cash: 0, online: 0 }
+      // Subtract old values
+      if (oldDeposit && oldPaymentMode) {
+        s.totalDeposit -= oldDeposit
+        if (oldPaymentMode === "cash") s.cash -= oldDeposit
+        else if (oldPaymentMode === "online") s.online -= oldDeposit
+      }
+      // Add new values
+      if (newDeposit && newPaymentMode) {
+        s.totalDeposit += newDeposit
+        if (newPaymentMode === "cash") s.cash += newDeposit
+        else if (newPaymentMode === "online") s.online += newDeposit
+      }
+      s.totalDeposit = Math.max(0, s.totalDeposit)
+      s.cash = Math.max(0, s.cash)
+      s.online = Math.max(0, s.online)
+      return s
+    })
+  }
+  
   /* ---------------------------
      Form Submission
   --------------------------- */
@@ -512,18 +549,18 @@ export default function EditIPDPage() {
       toast.error("Original data not fully loaded")
       return
     }
-
+  
     setLoading(true)
     try {
       // Detect changes
       const changes = detectChanges(originalPatient, originalIPD, originalBilling, data)
-
+  
       if (changes.length === 0) {
         toast.info("No changes detected")
         setLoading(false)
         return
       }
-
+  
       // 1) Update patientinfo if basic info changed
       const patientUpdates: any = {}
       if (String(originalPatient.name) !== String(data.name)) patientUpdates.name = data.name
@@ -533,7 +570,6 @@ export default function EditIPDPage() {
       }
       if (String(originalPatient.age) !== String(data.age)) patientUpdates.age = data.age
       if (String(originalPatient.ageUnit) !== String(data.ageUnit?.value || "")) {
-        // ADDED: Update age unit
         patientUpdates.ageUnit = data.ageUnit?.value || ""
       }
       if (String(originalPatient.address) !== String(data.address || "")) {
@@ -543,7 +579,7 @@ export default function EditIPDPage() {
         patientUpdates.updatedAt = new Date().toISOString()
         await update(ref(db, `patients/patientinfo/${patienteditId}`), patientUpdates)
       }
-
+  
       // 2) Handle bed status changes
       if (oldBedInfo && data.roomType?.value && data.bed?.value && data.bed.value !== oldBedInfo.bedId) {
         const oldBedRef = ref(db, `beds/${oldBedInfo.roomType}/${oldBedInfo.bedId}`)
@@ -554,13 +590,13 @@ export default function EditIPDPage() {
         const newBedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`)
         await update(newBedRef, { status: "Occupied" })
       }
-
+  
       // 3) Update IPD record (userinfoipd)
       const ipdData: any = {
         relativeName: data.relativeName,
         relativePhone: data.relativePhone,
         relativeAddress: data.relativeAddress || "",
-        admissionDate: format(data.date, "yyyy-MM-dd"), // Update the field, but the record's path remains fixed by admissionDateParam
+        admissionDate: format(data.date, "yyyy-MM-dd"), // The node path remains fixed by admissionDateParam
         admissionTime: data.time,
         admissionSource: data.admissionSource?.value || "",
         admissionType: data.admissionType?.value || "",
@@ -572,37 +608,49 @@ export default function EditIPDPage() {
         lastModifiedBy: currentUserEmail || "unknown",
       }
       await update(
-        ref(db, `patients/ipddetail/userinfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}`), // Use admissionDateParam from URL
+        ref(db, `patients/ipddetail/userinfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}`),
         ipdData,
       )
-
-      // 4) Update billing if deposit changed
-      const prevDeposit = originalBilling.totalDeposit || 0
-      const newDeposit = data.deposit || 0
-      if (String(prevDeposit) !== String(newDeposit)) {
-        // Update totalDeposit
+  
+      // 4) Update billing if deposit OR payment mode changed
+      const prevDeposit = Number(originalBilling.totalDeposit || 0)
+      const newDeposit = Number(data.deposit || 0)
+      const prevPayMode = (originalBilling.paymentMode || "cash").toLowerCase()
+      const newPayMode = (data.paymentMode?.value || "cash").toLowerCase()
+      const depositChanged = String(prevDeposit) !== String(newDeposit)
+      const payModeChanged = prevPayMode !== newPayMode
+  
+      if (depositChanged || payModeChanged) {
+        // Update totalDeposit and payment mode in billing node
         await update(
-          ref(db, `patients/ipddetail/userbillinginfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}`), // Use admissionDateParam from URL
-          { totalDeposit: newDeposit },
+          ref(db, `patients/ipddetail/userbillinginfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}`),
+          { totalDeposit: newDeposit, paymentMode: newPayMode },
         )
-        // Add a new payment entry
+        // Add payment entry
         const paymentRef = push(
-          ref(db, `patients/ipddetail/userbillinginfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}/payments`), // Use admissionDateParam from URL
+          ref(db, `patients/ipddetail/userbillinginfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}/payments`),
         )
         await update(paymentRef, {
           amount: newDeposit - prevDeposit,
           date: new Date().toISOString(),
-          paymentType: data.paymentMode?.value || "",
+          paymentType: newPayMode,
           type: "advance",
           createdAt: new Date().toISOString(),
         })
+  
+        // ------- UPDATE SUMMARY ACCORDINGLY ----------
+        await adjustIpdSummaryOnEdit({
+          dateKey: admissionDateParam,
+          oldDeposit: prevDeposit,
+          newDeposit: newDeposit,
+          oldPaymentMode: prevPayMode,
+          newPaymentMode: newPayMode,
+        })
       }
-
+  
       // 5) Update ipdactive node if relevant fields changed
       const ipdActiveUpdates: any = {}
       let shouldUpdateIpdActive = false
-
-      // Check for changes in fields relevant to ipdactive
       if (String(originalPatient.name) !== String(data.name)) {
         ipdActiveUpdates.name = data.name
         shouldUpdateIpdActive = true
@@ -623,11 +671,10 @@ export default function EditIPDPage() {
         ipdActiveUpdates.advanceDeposit = data.deposit || 0
         shouldUpdateIpdActive = true
       }
-
       if (shouldUpdateIpdActive) {
         await update(ref(db, `patients/ipdactive/${ipdeditId}`), ipdActiveUpdates)
       }
-
+  
       // 6) Save change tracking
       const changesRef = ref(db, "ipdChanges")
       const newChangeRef = push(changesRef)
@@ -635,13 +682,13 @@ export default function EditIPDPage() {
         type: "edit",
         ipdId: ipdeditId,
         patientId: patienteditId,
-        admissionDate: admissionDateParam, // Add admissionDate to log for context
+        admissionDate: admissionDateParam,
         patientName: data.name,
         changes,
         editedBy: currentUserEmail || "unknown",
         editedAt: new Date().toISOString(),
       })
-
+  
       toast.success("IPD record updated successfully!")
       router.push("/billing")
     } catch (err) {
@@ -651,6 +698,7 @@ export default function EditIPDPage() {
       setLoading(false)
     }
   }
+  
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 p-4 md:p-8">
