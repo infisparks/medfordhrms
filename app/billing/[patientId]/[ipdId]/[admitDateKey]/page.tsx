@@ -59,6 +59,7 @@ interface Payment {
   paymentType: string
   type: "advance" | "refund"
   date: string
+  through?: string // Added 'through' field
 }
 interface AdditionalServiceForm {
   serviceName: string
@@ -71,6 +72,7 @@ interface PaymentForm {
   type: string
   sendWhatsappNotification: boolean
   paymentDate: string
+  through?: string // Made optional
 }
 interface DiscountForm {
   discount: number
@@ -141,15 +143,16 @@ const additionalServiceSchema = yup
   .required()
 const paymentSchema = yup
   .object({
-    paymentAmount: yup
-      .number()
-      .typeError("Amount must be a number")
-      .positive("Must be positive")
-      .required("Amount is required"),
-    paymentType: yup.string().required("Payment Type is required"),
-    type: yup.string().required("Type is required"),
+    paymentAmount: yup.number().required(),
+    paymentType: yup.string().required(),
+    type: yup.string().required(),
     sendWhatsappNotification: yup.boolean().required(),
-    paymentDate: yup.string().required("Payment Date is required"),
+    paymentDate: yup.string().required(),
+    through: yup.string().when("paymentType", {
+      is: (paymentType: string) => paymentType === "online" || paymentType === "card",
+      then: (schema) => schema.required("Through is required for online/card payments"),
+      otherwise: (schema) => schema.notRequired(),
+    }),
   })
   .required()
 const discountSchema = yup
@@ -233,6 +236,7 @@ export default function BillingPage() {
       type: "advance",
       sendWhatsappNotification: false,
       paymentDate: new Date().toISOString().slice(0, 10),
+      through: "cash", // Default to 'cash' for 'cash' payment type
     },
   })
   const {
@@ -263,6 +267,17 @@ export default function BillingPage() {
       isCustomDoctor: false,
     },
   })
+
+  const watchPaymentType = watchPayment("paymentType");
+
+  // Update 'through' default value when 'paymentType' changes
+  useEffect(() => {
+    if (watchPaymentType === "cash") {
+      setValuePayment("through", "cash");
+    } else {
+      setValuePayment("through", ""); // Clear for other types
+    }
+  }, [watchPaymentType, setValuePayment]);
 
   // Fetch beds
   useEffect(() => {
@@ -390,6 +405,7 @@ export default function BillingPage() {
                 paymentType: billingData.payments[k].paymentType || "cash",
                 type: billingData.payments[k].type || "advance",
                 date: billingData.payments[k].date || new Date().toISOString(),
+                through: billingData.payments[k].through || "", // Read 'through' from Firebase
               }))
             : []
           const depositTotal = Number(billingData.totalDeposit) || 0
@@ -693,6 +709,7 @@ export default function BillingPage() {
         type: formData.type as "advance" | "refund",
         date: isoDate,
         id: newRef.key!,
+        through: formData.through, // Save 'through' field
       }
       await update(newRef, newPayment)
 
@@ -727,6 +744,7 @@ export default function BillingPage() {
         type: "advance",
         sendWhatsappNotification: false,
         paymentDate: new Date().toISOString().slice(0, 10),
+        through: "cash", // Reset to 'cash' after submission
       })
     } catch (error) {
       console.error("Error recording payment:", error)
@@ -985,6 +1003,22 @@ export default function BillingPage() {
       toast.error("Failed to copy details. Please try again.")
     }
   }
+
+  const getThroughOptions = () => {
+    if (watchPaymentType === "online" || watchPaymentType === "card") {
+      return (
+        <>
+          <option value="">Select Option</option>
+          <option value="upi">UPI</option>
+          <option value="credit-card">Credit Card</option>
+          <option value="debit-card">Debit Card</option>
+          <option value="netbanking">Net Banking</option>
+          <option value="cheque">Cheque</option>
+        </>
+      );
+    }
+    return <option value="cash">Cash</option>;
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 to-teal-50">
@@ -1669,6 +1703,9 @@ export default function BillingPage() {
                                     Type
                                   </th>
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Through
+                                  </th>{/* New Table Header */}
+                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Date
                                   </th>
                                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1687,6 +1724,9 @@ export default function BillingPage() {
                                       {payment.paymentType}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.type}</td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                                      {payment.through || "N/A"}
+                                    </td>{/* Display 'through' */}
                                     <td className="px-4 py-3 text-sm text-gray-500">
                                       {new Date(payment.date).toLocaleString()}
                                     </td>
@@ -1716,7 +1756,9 @@ export default function BillingPage() {
                           </h3>
                           <form onSubmit={handleSubmitPayment(onSubmitPayment)} className="space-y-4">
                             <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">Payment Amount (₹)</label>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Payment Amount (₹)
+                              </label>
                               <input
                                 type="number"
                                 {...registerPayment("paymentAmount")}
@@ -1744,6 +1786,21 @@ export default function BillingPage() {
                               </select>
                               {errorsPayment.paymentType && (
                                 <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentType.message}</p>
+                              )}
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Through</label>
+                              <select
+                                {...registerPayment("through")}
+                                className={`w-full px-3 py-2 rounded-lg border ${
+                                  errorsPayment.through ? "border-red-500" : "border-gray-300"
+                                } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                                disabled={watchPaymentType === "cash"} // Disable if paymentType is cash
+                              >
+                                {getThroughOptions()}
+                              </select>
+                              {errorsPayment.through && (
+                                <p className="text-red-500 text-xs mt-1">{errorsPayment.through.message}</p>
                               )}
                             </div>
                             <div>
@@ -2077,6 +2134,9 @@ export default function BillingPage() {
                             Type
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Through
+                          </th>{/* New Table Header in Modal */}
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Date
                           </th>
                           <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -2093,6 +2153,9 @@ export default function BillingPage() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.paymentType}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.type}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              {payment.through || "N/A"}
+                            </td>{/* Display 'through' in Modal */}
                             <td className="px-4 py-3 text-sm text-gray-500">
                               {new Date(payment.date).toLocaleString()}
                             </td>
