@@ -3,7 +3,7 @@
 import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import { db } from "@/lib/firebase"
-import { format } from "date-fns"
+import { format, parseISO } from "date-fns" // Import parseISO
 import { ref, get, remove, onChildAdded, onChildChanged, onChildRemoved, off, query, orderByChild, equalTo, startAt, endAt, runTransaction } from "firebase/database"
 import { useRouter } from "next/navigation"
 import { Input } from "@/components/ui/input"
@@ -18,6 +18,14 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Calendar, RefreshCw, Eye, ArrowUpDown, X, Filter, Trash2, AlertCircle, Users } from "lucide-react"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
+
+// Date Picker imports
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { cn } from "@/lib/utils" // Assuming you have a utility for class concatenation
+import { Calendar as CalendarIcon } from "lucide-react"
+import { DayPicker } from "react-day-picker"
+import "react-day-picker/dist/style.css"
+
 
 function byteSize(str: string) {
   return new Blob([str]).size
@@ -99,6 +107,9 @@ export default function ManageOPDPage() {
   const [downloadedCount, setDownloadedCount] = useState(0)
   const [downloadedBytes, setDownloadedBytes] = useState(0)
 
+  // Date Filter State
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date()) // Default to today
+
   // UHID Search
   const [uhidSearch, setUhidSearch] = useState("")
   const [uhidSearchLoading, setUhidSearchLoading] = useState(false)
@@ -142,16 +153,29 @@ export default function ManageOPDPage() {
     }
   }, [])
 
-  // ============ Default Today List =============
-  // This effect will run on initial load and when the activeFilterTab is "today"
+  // ============ Main Data Fetching Effect =============
+  // This effect will run on initial load and when the activeFilterTab or selectedDate changes,
+  // provided no search (UHID/Phone) is active.
   useEffect(() => {
-    // Only fetch today's data if no search is active
-    if (!uhidSearch && !phoneSearch && activeFilterTab === "today") {
+    // Only fetch default/date-filtered data if no search is active
+    if (!uhidSearch && !phoneSearch) {
       setIsLoading(true)
-      clearAllListeners() // Clear any existing search listeners
+      clearAllListeners() // Clear any existing search or previous date listeners
 
-      const todayKey = getTodayDateKey()
-      const opdRef = ref(db, `patients/opddetail/${todayKey}`)
+      let dateToFetchKey = ""
+      if (activeFilterTab === "today") {
+        dateToFetchKey = getTodayDateKey()
+      } else if (selectedDate && activeFilterTab === "date-filter") {
+        dateToFetchKey = format(selectedDate, "yyyy-MM-dd")
+      } else {
+        // If activeFilterTab is a doctor name, we rely on the collected doctor tabs
+        // which are derived from the 'today' or 'date-filter' data.
+        // So, we just return if a doctor tab is active without a primary date filter.
+        setIsLoading(false);
+        return;
+      }
+
+      const opdRef = ref(db, `patients/opddetail/${dateToFetchKey}`)
 
       const addedListener = onChildAdded(opdRef, (uhidSnap) => {
         uhidSnap.forEach((apptSnap: any) => {
@@ -159,7 +183,7 @@ export default function ManageOPDPage() {
           setAppointments((prev) => {
             if (!prev.some(a => a.id === newAppt.id && a.patientId === newAppt.patientId)) {
               const updated = [...prev, newAppt];
-              setDoctorTabs(collectDoctorTabs(updated));
+              setDoctorTabs(collectDoctorTabs(updated)); // Recalculate doctor tabs based on new data
               setDownloadedCount(updated.length);
               setDownloadedBytes(prevBytes => prevBytes + byteSize(JSON.stringify(apptSnap.val())));
               return updated;
@@ -176,7 +200,7 @@ export default function ManageOPDPage() {
             const updated = prev.map(a =>
               (a.id === updatedAppt.id && a.patientId === updatedAppt.patientId) ? updatedAppt : a
             );
-            setDoctorTabs(collectDoctorTabs(updated));
+            setDoctorTabs(collectDoctorTabs(updated)); // Recalculate doctor tabs based on new data
             return updated;
           });
         });
@@ -186,7 +210,7 @@ export default function ManageOPDPage() {
         uhidSnap.forEach((apptSnap: any) => {
           setAppointments((prev) => {
             const updated = prev.filter(a => !(a.id === apptSnap.key && a.patientId === uhidSnap.key));
-            setDoctorTabs(collectDoctorTabs(updated));
+            setDoctorTabs(collectDoctorTabs(updated)); // Recalculate doctor tabs based on new data
             setDownloadedCount(updated.length);
             setDownloadedBytes(prevBytes => prevBytes - byteSize(JSON.stringify(apptSnap.val()))); // Approximate
             return updated;
@@ -215,11 +239,24 @@ export default function ManageOPDPage() {
       }).catch(() => setIsLoading(false))
 
       uhidListenerRef.current = { added: addedListener, changed: changedListener, removed: removedListener };
-      uhidListenerPath.current = `patients/opddetail/${todayKey}`;
+      uhidListenerPath.current = `patients/opddetail/${dateToFetchKey}`;
     }
-  }, [activeFilterTab, uhidSearch, phoneSearch]) // Re-run if filter changes, or searches are cleared
+  }, [activeFilterTab, selectedDate, uhidSearch, phoneSearch]) // Re-run if filters/date change, or searches are cleared
+
+  // Handle date selection from date picker
+  const handleDateSelect = (date: Date | undefined) => {
+    setSelectedDate(date);
+    if (date) {
+      setActiveFilterTab("date-filter"); // Activate the date filter tab
+      setUhidSearch(""); // Clear UHID search
+      setPhoneSearch(""); // Clear Phone search
+    } else {
+      setActiveFilterTab("today"); // If date is cleared, revert to today
+    }
+  }
 
   // ============ UHID Search Logic =============
+  // (No changes needed here as it already clears other listeners and sets its own)
   useEffect(() => {
     clearAllListeners() // Clear other listeners when a new search starts
     setAppointments([]) // Clear previous appointments
@@ -297,6 +334,11 @@ export default function ManageOPDPage() {
         setUhidSearchLoading(false)
 
         // Set up real-time listeners for partial UHID search on today's data
+        // This part needs careful handling if the data is large.
+        // Current implementation re-attaches listeners for *each* matching UHID path found
+        // which could lead to many listeners. For a partial search, a full scan is often done.
+        // If data for a single day is expected to be huge, consider refining this.
+        // For now, it will set up listeners for the UHIDs found in the initial `get` operation.
         Object.keys(data || {}).forEach((uhid) => {
           if (uhid.toLowerCase().startsWith(uhidSearch.toLowerCase())) {
             const path = `patients/opddetail/${todayKey}/${uhid}`
@@ -322,11 +364,14 @@ export default function ManageOPDPage() {
               setAppointments((prev: Appointment[]) => prev.filter(a => !(a.id === snap.key && a.patientId === uhid)))
             }
 
-            onChildAdded(ref(db, path), added)
-            onChildChanged(ref(db, path), changed)
-            onChildRemoved(ref(db, path), removed)
-            uhidListenerRef.current = { added, changed, removed }
-            uhidListenerPath.current = path
+            // Only attach new listener if it's not already attached for this path
+            const existingListener = uhidListenerRef.current?.path === path;
+            if (!existingListener) {
+              onChildAdded(ref(db, path), added)
+              onChildChanged(ref(db, path), changed)
+              onChildRemoved(ref(db, path), removed)
+              uhidListenerRef.current = { added, changed, removed, path } // Store path for clearing
+            }
           }
         })
       }).catch((error) => {
@@ -338,6 +383,7 @@ export default function ManageOPDPage() {
   }, [uhidSearch])
 
   // ============ Phone Search Logic =============
+  // (No changes needed here as it already clears other listeners and sets its own)
   useEffect(() => {
     clearAllListeners() // Clear other listeners when a new search starts
     setAppointments([]) // Clear previous appointments
@@ -356,12 +402,8 @@ export default function ManageOPDPage() {
         const result: Appointment[] = [];
         let totalBytes = 0;
 
-        const promises: Promise<void>[] = [];
-
         dateSnapshots.forEach((dateSnap) => {
-          const dateKey = dateSnap.key;
           const patientsForDate = dateSnap.val();
-
           if (patientsForDate) {
             Object.entries(patientsForDate).forEach(([patientId, appointmentsForPatient]: any) => {
               Object.entries(appointmentsForPatient || {}).forEach(([apptId, apptData]: any) => {
@@ -375,11 +417,6 @@ export default function ManageOPDPage() {
         });
 
         // Set up real-time listeners for *all* appointments that match the phone number
-        // This is tricky as we need to listen on each date and patientId path.
-        // A more scalable solution for full phone search with real-time updates might involve
-        // a Cloud Function to denormalize data or a separate index.
-        // For now, we'll set up listeners for the found appointments.
-
         result.forEach((appt) => {
           const path = `patients/opddetail/${format(new Date(appt.date), "yyyy-MM-dd")}/${appt.patientId}`;
           const added = (snap: any) => {
@@ -405,10 +442,15 @@ export default function ManageOPDPage() {
           const removed = (snap: any) => {
             setAppointments((prev: Appointment[]) => prev.filter(a => !(a.id === snap.key && a.patientId === appt.patientId)));
           };
-          onChildAdded(ref(db, path), added);
-          onChildChanged(ref(db, path), changed);
-          onChildRemoved(ref(db, path), removed);
-          phoneListenerRefs.current.push({ path, added, changed, removed });
+
+          // Only attach new listener if it's not already attached for this path
+          const existingListener = phoneListenerRefs.current.some(listener => listener.path === path);
+          if (!existingListener) {
+            onChildAdded(ref(db, path), added);
+            onChildChanged(ref(db, path), changed);
+            onChildRemoved(ref(db, path), removed);
+            phoneListenerRefs.current.push({ path, added, changed, removed });
+          }
         });
 
         setAppointments(result);
@@ -474,10 +516,15 @@ export default function ManageOPDPage() {
           const removed = (snap: any) => {
             setAppointments((prev: Appointment[]) => prev.filter(a => !(a.id === snap.key && a.patientId === appt.patientId)))
           }
-          onChildAdded(ref(db, path), added)
-          onChildChanged(ref(db, path), changed)
-          onChildRemoved(ref(db, path), removed)
-          phoneListenerRefs.current.push({ path, added, changed, removed })
+
+          // Only attach new listener if it's not already attached for this path
+          const existingListener = phoneListenerRefs.current.some(listener => listener.path === path);
+          if (!existingListener) {
+            onChildAdded(ref(db, path), added)
+            onChildChanged(ref(db, path), changed)
+            onChildRemoved(ref(db, path), removed)
+            phoneListenerRefs.current.push({ path, added, changed, removed })
+          }
         })
       }).catch((error) => {
         console.error("Error fetching partial phone search:", error);
@@ -488,10 +535,13 @@ export default function ManageOPDPage() {
   }, [phoneSearch])
 
 
-  // ============ Filtered Appointments for Doctor Tabs ============
+  // ============ Filtered Appointments for Doctor Tabs and Date ============
   const filteredAndSortedAppointments = [...appointments]
     .filter((app) => {
-      if (activeFilterTab !== "today") {
+      // If a doctor tab is active, filter by doctor.
+      // If "today" or "date-filter" is active, no additional doctor filter is applied here,
+      // as `appointments` itself already contains the data for that date.
+      if (activeFilterTab !== "today" && activeFilterTab !== "date-filter") {
         return app.modalities.some(
           (modality: any) =>
             DOCTOR_MODALITY_TYPES.includes(modality.type) &&
@@ -500,7 +550,16 @@ export default function ManageOPDPage() {
       }
       return true
     })
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .sort((a, b) => {
+      // Sort by time for the current day's appointments, otherwise by date
+      if (activeFilterTab === "today" || activeFilterTab === "date-filter") {
+        const timeA = parseISO(`2000-01-01T${a.time}`); // Use a dummy date for time comparison
+        const timeB = parseISO(`2000-01-01T${b.time}`);
+        return timeA.getTime() - timeB.getTime();
+      }
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    })
+
 
   // ==== DELETE LOGIC ====
   const handleDeleteAppointment = (appt: Appointment) => {
@@ -620,23 +679,58 @@ export default function ManageOPDPage() {
         <div className="max-w-7xl mx-auto px-4 py-8">
           <Tabs value={activeFilterTab} onValueChange={setActiveFilterTab} className="w-full mb-4">
             <TabsList className="bg-slate-100 flex flex-wrap gap-2">
-              <TabsTrigger value="today">Today</TabsTrigger>
+              <TabsTrigger value="today" onClick={() => setSelectedDate(new Date())}>Today</TabsTrigger> {/* Set today's date when 'Today' tab is clicked */}
               {doctorTabs.map((doctor) => (
                 <TabsTrigger key={doctor.name} value={doctor.name}>
                   Dr. {doctor.name} ({doctor.count})
                 </TabsTrigger>
               ))}
+              {/* Date Filter Tab */}
+              {selectedDate && activeFilterTab === "date-filter" && (
+                <TabsTrigger value="date-filter">
+                  {format(selectedDate, "dd/MM/yyyy")}
+                </TabsTrigger>
+              )}
             </TabsList>
           </Tabs>
           <Card className="mb-6 border border-slate-200 shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Filter className="h-4 w-4" />
-                Fast Search (by UHID or Phone)
+                Filter Options
               </CardTitle>
             </CardHeader>
             <CardContent className="pb-4">
               <div className="flex flex-wrap gap-4 items-center mb-2">
+                {/* Date Picker */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant={"outline"}
+                      className={cn(
+                        "w-[240px] justify-start text-left font-normal",
+                        !selectedDate && "text-muted-foreground"
+                      )}
+                      onClick={() => {
+                        // Clear searches when opening date picker to ensure date filter works
+                        setUhidSearch("");
+                        setPhoneSearch("");
+                      }}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {selectedDate ? format(selectedDate, "PPP") : <span>Pick a date</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <DayPicker
+                      mode="single"
+                      selected={selectedDate}
+                      onSelect={handleDateSelect}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center gap-2">
                     <Input
@@ -645,6 +739,8 @@ export default function ManageOPDPage() {
                       onChange={(e) => {
                         setUhidSearch(e.target.value)
                         setPhoneSearch("") // Clear phone search when UHID search is active
+                        setSelectedDate(undefined); // Clear date filter
+                        setActiveFilterTab("today"); // Revert to today if UHID search
                       }}
                       className="max-w-xs"
                     />
@@ -668,6 +764,8 @@ export default function ManageOPDPage() {
                         const val = e.target.value.replace(/\D/g, "")
                         setPhoneSearch(val.slice(0, 10))
                         setUhidSearch("") // Clear UHID search when phone search is active
+                        setSelectedDate(undefined); // Clear date filter
+                        setActiveFilterTab("today"); // Revert to today if Phone search
                       }}
                       className="max-w-xs"
                     />
@@ -695,7 +793,9 @@ export default function ManageOPDPage() {
                 <Calendar className="h-4 w-4" />
                 {activeFilterTab === "today"
                   ? "Today's Appointments"
-                  : `Appointments for Dr. ${activeFilterTab}`}
+                  : activeFilterTab === "date-filter"
+                    ? `Appointments for ${selectedDate ? format(selectedDate, "dd/MM/yyyy") : "selected date"}`
+                    : `Appointments for Dr. ${activeFilterTab}`}
               </CardTitle>
               <CardDescription>
                 {filteredAndSortedAppointments.length
@@ -740,6 +840,7 @@ export default function ManageOPDPage() {
                           </Button>
                         </TableHead>
                         <TableHead>Date</TableHead>
+                        <TableHead>Time</TableHead> {/* Added Time column */}
                         <TableHead>Type</TableHead>
                         <TableHead className="text-right">Amount</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
@@ -754,6 +855,7 @@ export default function ManageOPDPage() {
                           </TableCell>
                           <TableCell className="text-sm text-gray-600 font-mono">{app.patientId}</TableCell>
                           <TableCell>{format(new Date(app.date), "dd/MM/yyyy")}</TableCell>
+                          <TableCell>{app.time}</TableCell> {/* Display Time */}
                           <TableCell>
                             <Badge variant={app.appointmentType === "visithospital" ? "default" : "secondary"}>
                               {app.appointmentType === "visithospital" ? "Visit" : "On Call"}
