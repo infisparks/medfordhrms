@@ -19,6 +19,7 @@ import { generateNextUHID } from "@/components/uhid-generator"
 import { CheckCircle, User, Clock, Hospital, PhoneCall } from "lucide-react"
 import Head from "next/head"
 import { openBillInNewTabProgrammatically } from "@/app/edit-appointment/bill-generator"
+import { generateNextBillNumber } from "@/lib/bill-generator"; // Import the updated utility
 
 function formatAMPM(date: Date): string {
   const rawHours = date.getHours()
@@ -47,7 +48,7 @@ async function sendWhatsAppMessage(phone: string, message: string): Promise<bool
   }
 }
 
-function generateAppointmentMessage(data: IFormInput, uhid: string, appointmentType: "hospital" | "oncall"): string {
+function generateAppointmentMessage(data: IFormInput, uhid: string, appointmentType: "hospital" | "oncall", billNumber?: string): string {
   const appointmentDate = data.date.toLocaleDateString("en-IN", {
     weekday: "long",
     year: "numeric",
@@ -67,7 +68,7 @@ ${data.referredBy ? `• Referred By: ${data.referredBy}` : ""}
 ${data.message ? `📝 *Notes:* ${data.message}` : ""}
 For any queries, please contact our reception.
 Thank you for choosing our healthcare services!
-* G-Medford-NX Hospital *`
+* Medford  Hospital *`
   } else {
     const modalities = data.modalities || []
     const servicesText = modalities
@@ -86,6 +87,7 @@ Thank you for choosing our healthcare services!
     return `🏥 *APPOINTMENT CONFIRMATION*
 Dear ${data.name}, Your *Appointment* has been successfully booked!
 📋 *Appointment Details:*
+${billNumber ? `• Bill No.: ${billNumber}` : ""}
 • Patient ID: ${uhid}
 • Date: ${appointmentDate}
 • Time: ${data.time}
@@ -99,7 +101,7 @@ ${discount > 0 ? `• Discount: ₹${discount}` : ""}
 ${data.message ? `📝 *Notes:* ${data.message}` : ""}
 For any queries, please contact our reception.
 Thank you for choosing our healthcare services!
-*Medford  Healthcare*`
+*Medford Healthcare*`
   }
 }
 
@@ -121,6 +123,7 @@ export default function Page() {
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [activeTab, setActiveTab] = useState("booking")
   const [lastUhid, setLastUhid] = useState<string | null>(null)
+  const [lastBillNumber, setLastBillNumber] = useState<string | null>(null); // State for last bill number
 
   const form = useForm<IFormInput>({
     defaultValues: {
@@ -302,6 +305,10 @@ export default function Page() {
         const professionalMessage = generateAppointmentMessage(data, uhid, "oncall")
         await sendWhatsAppMessage(data.phone, professionalMessage)
       } else {
+        // Generate Bill Number for hospital visits
+        const billNumber = await generateNextBillNumber();
+        setLastBillNumber(billNumber); // Set the last bill number state (for display in success message)
+
         const cash = Number(data.cashAmount) || 0
         const online = Number(data.onlineAmount) || 0
         const discount = Number(data.discount) || 0
@@ -341,6 +348,7 @@ export default function Page() {
           opdType: data.opdType,
           enteredBy: currentUserEmail || "unknown",
           createdAt: new Date().toISOString(),
+          billNumber: billNumber, // Save bill number in appointment node
         })
         const opdId = opdRef.key
         if (opdId) {
@@ -377,16 +385,18 @@ export default function Page() {
         })
         // ----------------- OPD SUMMARY NODE UPDATE END -----------------
 
-        const professionalMessage = generateAppointmentMessage(data, uhid, "hospital")
+        const professionalMessage = generateAppointmentMessage(data, uhid, "hospital", billNumber)
         await sendWhatsAppMessage(data.phone, professionalMessage)
-      }
 
-      // ---------------- AUTO OPEN BILL PDF in new tab ------------------
-      await openBillInNewTabProgrammatically(
-        { ...data, date: data.date },
-        uhid,
-        doctors.map((d) => ({ id: d.id, name: d.name }))
-      )
+        // ---------------- AUTO OPEN BILL PDF in new tab ------------------
+        // IMPORTANT: Pass the *local* `billNumber` variable directly, not the state `lastBillNumber`
+        await openBillInNewTabProgrammatically(
+          { ...data, date: data.date },
+          uhid,
+          doctors.map((d) => ({ id: d.id, name: d.name })),
+          billNumber // Pass the actual generated billNumber
+        )
+      }
 
       setIsSubmitted(true)
       setTimeout(() => {
@@ -417,6 +427,7 @@ export default function Page() {
         setSelectedPatient(null)
         setUhidSearchInput("")
         setLastUhid(null)
+        setLastBillNumber(null); // Clear last bill number
       }, 3000)
     } catch (err) {
       console.error(err)
@@ -492,6 +503,13 @@ export default function Page() {
                 <div className="flex flex-col items-center gap-1">
                   <span className="text-sm font-semibold text-blue-700">
                     Patient UHID: <span className="font-mono">{lastUhid}</span>
+                  </span>
+                </div>
+              )}
+              {lastBillNumber && ( // Display bill number if available
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-sm font-semibold text-purple-700">
+                    Bill Number: <span className="font-mono">{lastBillNumber}</span>
                   </span>
                 </div>
               )}

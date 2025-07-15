@@ -1,6 +1,8 @@
+// app/edit-appointment/edit-appointment-form.tsx
+
 "use client"
 
-import { useEffect, useCallback, useMemo } from "react"
+import { useEffect, useCallback, useMemo, useRef } from "react" // Added useRef
 import { type UseFormReturn, Controller } from "react-hook-form"
 import { type IFormInput, GenderOptions, PaymentOptions, AgeUnitOptions } from "../opd/types"
 import { DoctorSearchDropdown } from "../opd/Component/doctor-search-dropdown" // Fixed import
@@ -19,6 +21,7 @@ import {
   FileText,
   Hospital,
   PhoneCall,
+  Search, // Added Search icon import if used in PatientForm for UHID search
 } from "lucide-react"
 
 import DatePicker from "react-datepicker"
@@ -29,18 +32,41 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge" // Added Badge import
+import { ScrollArea } from "@/components/ui/scroll-area" // Added ScrollArea import
+import { Avatar, AvatarFallback } from "@/components/ui/avatar" // Added Avatar imports
 
 import { ModalitySelector } from "../opd/modality-selector"
-import { BillGenerator } from "./bill-generator"
+import { BillGenerator } from "./bill-generator" // This is the component that generates the PDF
 
 import type { Doctor } from "../opd/types"
 
 interface EditAppointmentFormProps {
-  form: UseFormReturn<IFormInput>
-  doctors: Doctor[]
-  appointmentId?: string
-  patientId?: string
+  form: UseFormReturn<IFormInput>;
+  doctors: Doctor[];
+  appointmentId?: string;
+  patientId?: string;
+  billNumber?: string; // THIS IS THE CRUCIAL LINE
+  // The following props are from PatientForm that might be copied over,
+  // ensure they match if PatientForm is directly copied or re-used here.
+  // For EditAppointmentForm, these are usually not needed as patient is already selected.
+  // patientSuggestions?: PatientRecord[];
+  // phoneSuggestions?: PatientRecord[];
+  // uhidSearchInput?: string;
+  // uhidSuggestions?: PatientRecord[];
+  // showNameSuggestions?: boolean;
+  // showPhoneSuggestions?: boolean;
+  // showUhidSuggestions?: boolean;
+  // selectedPatient?: PatientRecord | null;
+  // onPatientSelect?: (patient: PatientRecord) => void;
+  // onNameChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  // onPhoneChange?: (e.React.ChangeEvent<HTMLInputElement>) => void;
+  // onUhidChange?: (e.React.ChangeEvent<HTMLInputElement>) => void;
+  // setShowNameSuggestions?: (show: boolean) => void;
+  // setShowPhoneSuggestions?: (show: boolean) => void;
+  // setShowUhidSuggestions?: (show: boolean) => void;
 }
+
 
 function formatAMPM(date: Date): string {
   let hours = date.getHours()
@@ -52,7 +78,7 @@ function formatAMPM(date: Date): string {
   return `${hours}:${minutes} ${ampm}`
 }
 
-export function EditAppointmentForm({ form, doctors, appointmentId, patientId }: EditAppointmentFormProps) {
+export function EditAppointmentForm({ form, doctors, appointmentId, patientId, billNumber }: EditAppointmentFormProps) { // Destructure billNumber
   const {
     register,
     control,
@@ -657,6 +683,7 @@ export function EditAppointmentForm({ form, doctors, appointmentId, patientId }:
                         appointmentId={appointmentId}
                         patientId={patientId}
                         doctors={doctors}
+                        billNumber={billNumber} // Pass the billNumber prop here
                         className="bg-blue-600 hover:bg-blue-700 text-white"
                       />
                     </div>

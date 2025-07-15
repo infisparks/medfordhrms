@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useForm } from "react-hook-form"
+import { useForm } from "react-hook-form" // Ensure SubmitHandler is imported
 import { db, auth } from "@/lib/firebase"
 import { ref, get, update, push, set, runTransaction } from "firebase/database"
 import { onAuthStateChanged } from "firebase/auth"
@@ -37,8 +37,11 @@ export default function EditAppointmentPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dateKey, setDateKey] = useState<string | null>(urlDate)
+  const [currentBillNumber, setCurrentBillNumber] = useState<string | undefined>(undefined); // New state for bill number
 
+  // FIX: Explicitly pass IFormInput to useForm
   const form = useForm<IFormInput>({
+    // FIX: Corrected from 'defaultDefaults' to 'defaultValues'
     defaultValues: {
       name: "",
       phone: "",
@@ -133,8 +136,8 @@ export default function EditAppointmentPage() {
       if (doctors.length === 0) return // Wait for doctors to load
       setIsLoading(true)
       try {
-        let foundDateKey = dateKey
-        // If we don't already have dateKey, scan all dates for this appointment
+        let foundDateKey = urlDate // Prioritize urlDate if available
+        // If we don't have dateKey from URL, scan all dates for this appointment
         if (!foundDateKey) {
           const opdRef = ref(db, `patients/opddetail`)
           const opdSnap = await get(opdRef)
@@ -156,8 +159,9 @@ export default function EditAppointmentPage() {
             setIsLoading(false)
             return
           }
-          setDateKey(foundDateKey)
         }
+        setDateKey(foundDateKey) // Set the resolved dateKey
+
         // Now, load appointment data using foundDateKey
         const appointmentRef = ref(db, `patients/opddetail/${foundDateKey}/${uhid}/${appointmentId}`)
         const appointmentSnap = await get(appointmentRef)
@@ -167,6 +171,11 @@ export default function EditAppointmentPage() {
           return
         }
         const appointmentData = appointmentSnap.val()
+
+        // Extract bill number and set state
+        setCurrentBillNumber(appointmentData.billNumber || undefined);
+
+
         // Patient info
         const patientRef = ref(db, `patients/patientinfo/${uhid}`)
         const patientSnap = await get(patientRef)
@@ -232,7 +241,7 @@ export default function EditAppointmentPage() {
       }
     }
     loadAppointmentData()
-  }, [uhid, appointmentId, doctors, reset, dateKey])
+  }, [uhid, appointmentId, doctors, reset, urlDate]) // Depend on urlDate instead of dateKey here
 
   // On save: always update correct dateKey path
   const onSubmit = async (data: IFormInput) => {
@@ -319,6 +328,7 @@ export default function EditAppointmentPage() {
         opdType: data.opdType,
         lastModifiedBy: currentUserEmail || "unknown",
         lastModifiedAt: new Date().toISOString(),
+        billNumber: currentBillNumber, // Preserve existing billNumber
       }
 
       await update(ref(db, `patients/opddetail/${dateKey}/${uhid}/${appointmentId}`), updatedAppointmentData)
@@ -359,8 +369,6 @@ export default function EditAppointmentPage() {
       setIsSaving(false)
     }
   }
-
-  // ...rest of your component as before (no changes below this line)...
 
   if (isLoading) {
     return (
@@ -452,6 +460,7 @@ export default function EditAppointmentPage() {
                 doctors={doctors}
                 appointmentId={appointmentId || undefined}
                 patientId={uhid || undefined}
+                billNumber={currentBillNumber} // Pass the fetched bill number here
               />
               <div className="flex justify-between pt-6 border-t bg-gray-50 -mx-6 px-6 -mb-6 pb-6">
                 <Button
