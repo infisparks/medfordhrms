@@ -51,6 +51,8 @@ import IPDSignaturePDF from "./ipdsignaturepdf"
 
 import { generateAndDownloadEnglishLetterhead } from "./letterhead-utils" // If you're using a PDF component
 
+import { generateNextBillNumber } from "@/lib/bill-generator";
+
 /* ---------------------------------------------------------------------
 
 1) Types & Interfaces
@@ -819,6 +821,8 @@ const IPDBookingPage: React.FC = () => {
       let patientId: string
       let patientUHID: string
       const currentTime = new Date().toISOString()
+      // --- Generate Bill Number ---
+      const billNumber = await generateNextBillNumber();
   
       if (selectedPatient) {
         patientId = selectedPatient.id
@@ -867,6 +871,7 @@ const IPDBookingPage: React.FC = () => {
         admissionSource: data.admissionSource?.value || "",
         createdAt: currentTime,
         status: "active",
+        billNumber, // <-- Save bill number in ipddetail
       }
   
       // Date Key for the node
@@ -886,6 +891,7 @@ const IPDBookingPage: React.FC = () => {
           totalDeposit: data.deposit,
           paymentMode: data.paymentMode?.value || "",
           createdAt: currentTime,
+          billNumber, // <-- Save bill number in billing info
         }
         // Save billing info
         await set(ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}`), billingData)

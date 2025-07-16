@@ -83,6 +83,7 @@ export interface BillingRecord {
   discount?: number
 
   doctor?: string // NEW: Add doctor ID from IPD info
+  billNumber?: string // <-- Add bill number to BillingRecord
 }
 
 interface IDoctor {
@@ -506,6 +507,13 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
         <div className="text-[10px] text-gray-800 p-2 bg-transparent max-w-[520px]">
           {/* Header */}
 
+          {/* Bill Number at the top */}
+          {record.billNumber && (
+            <div className="flex justify-between mb-1">
+              <div className="font-bold text-[12px] text-blue-900">Bill No: {record.billNumber}</div>
+            </div>
+          )}
+
           <div className="flex justify-between mb-2">
             {/* Removed space-y-[1px] for minimal spacing */}
             <div className="flex flex-col"> 
@@ -565,6 +573,12 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
               <p>
                 <strong>Stay Duration:</strong> {dayCount} {dayCount === 1 ? "day" : "days"}
               </p>
+              {/* Bill Number below Stay Duration */}
+              {(record.billNumber || record.billNumber) && (
+                <p>
+                  <strong>Bill Number:</strong> {record.billNumber || record.billNumber}
+                </p>
+              )}
             </div>
           </div>
 
