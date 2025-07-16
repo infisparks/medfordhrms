@@ -508,11 +508,11 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
           {/* Header */}
 
           {/* Bill Number at the top */}
-          {record.billNumber && (
+          {/* {record.billNumber && (
             <div className="flex justify-between mb-1">
               <div className="font-bold text-[12px] text-blue-900">Bill No: {record.billNumber}</div>
             </div>
-          )}
+          )} */}
 
           <div className="flex justify-between mb-2">
             {/* Removed space-y-[1px] for minimal spacing */}
