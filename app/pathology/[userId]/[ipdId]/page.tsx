@@ -133,7 +133,7 @@ Medford Hospital
 
           const phoneWithCountryCode = `91${patientInfo.phone.replace(/\D/g, "")}`
 
-          await fetch("https://wa.medblisss.com/send-text", {
+          await fetch("https://a.infispark.in/send-text", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({

@@ -775,7 +775,7 @@ const IPDBookingPage: React.FC = () => {
     }
 
     try {
-      const response = await fetch("https://wa.medblisss.com/send-text", {
+      const response = await fetch("https://a.infispark.in/send-text", {
         method: "POST",
 
         headers: { "Content-Type": "application/json" },

@@ -470,7 +470,7 @@ export default function CasualtyDetailPage() {
           "Dear Patient, please find attached your casualty invoice PDF. Thank you for choosing Gautami Hospital Emergency Department.",
       }
 
-      const response = await fetch("https://wa.medblisss.com/send-image-url", {
+      const response = await fetch("https://a.infispark.in/send-image-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

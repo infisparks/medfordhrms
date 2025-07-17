@@ -33,7 +33,7 @@ function formatAMPM(date: Date): string {
 async function sendWhatsAppMessage(phone: string, message: string): Promise<boolean> {
   try {
     const phoneWithCountryCode = `91${phone.replace(/\D/g, "")}`
-    const response = await fetch("https://wa.medblisss.com/send-text", {
+    const response = await fetch("https://a.infispark.in/send-text", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
