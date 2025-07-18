@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useForm, Controller } from "react-hook-form"
-import { ref, onValue, update, push, set, get, runTransaction } from "firebase/database"
+import { ref, onValue, update, push, set, get, runTransaction, query, orderByChild, equalTo, limitToFirst } from "firebase/database"
 import { db, auth } from "@/lib/firebase"
 import { onAuthStateChanged } from "firebase/auth"
 import Select from "react-select"
@@ -11,7 +11,7 @@ import DatePicker from "react-datepicker"
 import "react-datepicker/dist/react-datepicker.css"
 import { toast } from "react-toastify"
 import { format } from "date-fns"
-import { User, Phone, Clock, Home, Users, Calendar, Bed, UserCheck, Check, AlertCircle } from "lucide-react"
+import { User, Phone, Clock, Home, Users, Calendar, Bed, UserCheck, Check, AlertCircle, Wallet } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -50,6 +50,7 @@ export interface IPDFormInput {
   // Billing
   deposit?: number
   paymentMode: { label: string; value: string } | null
+  through?: { label: string; value: string } | null; // ADDED: Through field
 }
 
 interface PatientRecord {
@@ -89,7 +90,8 @@ interface IPDRecord {
 
 interface BillingRecord {
   paymentMode: string
-  totalDeposit: number
+  totalDeposit: number;
+  payments?: { [key: string]: { amount: number; date: string; paymentType: string; type: string; amount_type?: string; createdAt: string; through?: string; } };
 }
 
 const GenderOptions = [
@@ -120,23 +122,46 @@ const AdmissionSourceOptions = [
 ]
 
 const RoomTypeOptions = [
+
   { value: "female_general_ward", label: "Female General Ward" },
+
   { value: "icu", label: "ICU" },
+
   { value: "male_general_ward", label: "Male General Ward" },
+
   { value: "maternity_ward", label: "Maternity Ward" },
+
   { value: "medford_general_ward", label: "Medford General Ward" },
+
   { value: "nicu", label: "NICU" },
+
   { value: "paediatric_ward", label: "Paediatric Ward" },
+
   { value: "test_ward", label: "Test Ward" },
+
   { value: "twin_sharing_deluxe", label: "Twin Sharing Deluxe" },
+
   { value: "suit_room", label: "Suit room" },
+
   { value: "deluxe_room", label: "Deluxe room" },
+
 ]
+
+
 
 const PaymentModeOptions = [
   { value: "cash", label: "Cash" },
   { value: "online", label: "Online" },
 ]
+
+const ThroughOptions = [
+  { value: "upi", label: "UPI" },
+  { value: "credit-card", label: "Credit Card" },
+  { value: "debit-card", label: "Debit Card" },
+  { value: "netbanking", label: "Net Banking" },
+  { value: "cheque", label: "Cheque" },
+];
+
 
 function formatAMPM(date: Date): string {
   let hours = date.getHours()
@@ -228,8 +253,13 @@ export default function EditIPDPage() {
       referDoctor: "",
       deposit: 0,
       paymentMode: PaymentModeOptions[0],
+      through: null, // ADDED default
     },
   })
+
+  // Watch the payment mode to conditionally render the 'Through' dropdown
+  const selectedPaymentMode = watch("paymentMode");
+
 
   // Auth state
   useEffect(() => {
@@ -355,6 +385,7 @@ export default function EditIPDPage() {
         setOriginalBilling({ totalDeposit: 0, paymentMode: PaymentModeOptions[0].value })
         setValue("deposit", 0)
         setValue("paymentMode", PaymentModeOptions[0])
+        setValue("through", null); // Set default for through
         return
       }
       const data = snapshot.val() as BillingRecord
@@ -363,6 +394,23 @@ export default function EditIPDPage() {
       // Payment mode inference: default to cash if none
       const paymentModeMatch = PaymentModeOptions.find((pm) => pm.value === data.paymentMode)
       setValue("paymentMode", paymentModeMatch || PaymentModeOptions[0])
+
+      // Set 'through' value
+      // We need to fetch the 'through' from the 'advance' payment within the 'payments' sub-node
+      const payments = data.payments;
+      let fetchedThroughValue: string | null = null;
+      if (payments) {
+          for (const key in payments) {
+              if (payments[key].amount_type === 'advance' && payments[key].through) {
+                  fetchedThroughValue = payments[key].through;
+                  break;
+              }
+          }
+      }
+
+      const throughMatch = ThroughOptions.find((t) => t.value === fetchedThroughValue);
+      setValue("through", throughMatch || null);
+
     })
     return () => unsubscribe()
   }, [patienteditId, ipdeditId, setValue, admissionDateParam])
@@ -528,7 +576,15 @@ export default function EditIPDPage() {
         newValue: upd.paymentMode?.value || "",
       })
     }
-
+    // Compare 'through' field, which is nested in originalBilling.payments
+    const originalThrough = Object.values(origB.payments || {}).find((p: any) => p.amount_type === 'advance')?.through || '';
+    if (originalThrough !== String(upd.through?.value || '')) {
+      changes.push({
+        field: "through",
+        oldValue: originalThrough,
+        newValue: upd.through?.value || '',
+      });
+    }
 
     return changes
   }
@@ -663,27 +719,59 @@ export default function EditIPDPage() {
       const newDeposit = Number(data.deposit || 0)
       const prevPayMode = (originalBilling.paymentMode || "cash").toLowerCase()
       const newPayMode = (data.paymentMode?.value || "cash").toLowerCase()
-      const depositChanged = String(prevDeposit) !== String(newDeposit)
-      const payModeChanged = prevPayMode !== newPayMode
+      const depositChanged = prevDeposit !== newDeposit;
+      const payModeChanged = prevPayMode !== newPayMode;
+      const prevThrough = Object.values(originalBilling.payments || {}).find((p: any) => p.amount_type === 'advance')?.through || '';
+      const newThrough = data.through?.value || '';
+      const throughChanged = prevThrough !== newThrough;
 
-      if (depositChanged || payModeChanged) {
-        // Update totalDeposit and payment mode in billing node
+      if (depositChanged || payModeChanged || throughChanged) {
+        // Update totalDeposit and payment mode in main billing node
         await update(
           ref(db, `patients/ipddetail/userbillinginfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}`),
           { totalDeposit: newDeposit, paymentMode: newPayMode },
-        )
-        // Add payment entry if deposit amount changed
+        );
+
+        const paymentsRef = ref(db, `patients/ipddetail/userbillinginfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}/payments`);
+        const existingPaymentsSnapshot = await get(paymentsRef);
+        const existingPayments = existingPaymentsSnapshot.val();
+
+        let advancePaymentKey: string | null = null;
+
+        // Find the existing 'advance' payment
+        if (existingPayments) {
+          for (const key in existingPayments) {
+            if (existingPayments[key].amount_type === 'advance') {
+              advancePaymentKey = key;
+              break;
+            }
+          }
+        }
+
+        const paymentEntryUpdates: any = {
+          date: new Date().toISOString(),
+          paymentType: newPayMode,
+          through: newThrough, // Always update 'through'
+          createdAt: new Date().toISOString(),
+        };
+
         if (depositChanged) {
-          const paymentRef = push(
-            ref(db, `patients/ipddetail/userbillinginfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}/payments`),
-          )
-          await set(paymentRef, { // Changed from update to set for new push
-            amount: newDeposit - prevDeposit,
-            date: new Date().toISOString(),
-            paymentType: newPayMode,
+          paymentEntryUpdates.amount = newDeposit;
+        }
+
+        if (advancePaymentKey) {
+          // Update existing 'advance' payment
+          const advancePaymentRef = ref(db, `patients/ipddetail/userbillinginfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}/payments/${advancePaymentKey}`);
+          await update(advancePaymentRef, paymentEntryUpdates);
+        } else if (newDeposit > 0) { // Only add if there's a deposit and no advance entry exists
+          // No existing 'advance' payment found, create a new one
+          const newPaymentRef = push(paymentsRef);
+          await set(newPaymentRef, {
+            ...paymentEntryUpdates,
+            amount: newDeposit, // Set amount for new entry
             type: "advance",
-            createdAt: new Date().toISOString(),
-          })
+            amount_type: "advance", // Explicitly mark as advance
+          });
         }
 
 
@@ -1162,11 +1250,63 @@ export default function EditIPDPage() {
                         placeholder="Select Mode"
                         styles={selectStyles}
                         classNamePrefix="react-select"
+                        onChange={(val) => {
+                          field.onChange(val);
+                          // Reset 'through' when payment mode changes
+                          setValue("through", null);
+                        }}
                       />
                     )}
                   />
                   {errors.paymentMode && <p className="text-xs text-red-500">{errors.paymentMode.message}</p>}
                 </div>
+
+                {/* Through (Conditional) */}
+                {selectedPaymentMode?.value === "online" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="through" className="text-sm font-medium">
+                      Through <span className="text-red-500">*</span>
+                    </Label>
+                    <Controller
+                      name="through"
+                      control={control}
+                      rules={{ required: selectedPaymentMode?.value === "online" ? "Through method is required" : false }}
+                      render={({ field }) => (
+                        <Select
+                          {...field}
+                          options={ThroughOptions}
+                          placeholder="Select Method"
+                          styles={selectStyles}
+                          classNamePrefix="react-select"
+                        />
+                      )}
+                    />
+                    {errors.through && <p className="text-xs text-red-500">{errors.through.message}</p>}
+                  </div>
+                )}
+
+                {selectedPaymentMode?.value === "cash" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="through" className="text-sm font-medium">
+                      Through
+                    </Label>
+                    <Controller
+                      name="through"
+                      control={control}
+                      defaultValue={{ value: "cash", label: "Cash" }} // Default to cash and disable
+                      render={({ field }) => (
+                        <Select
+                          {...field}
+                          options={[{ value: "cash", label: "Cash" }]}
+                          placeholder="Cash"
+                          styles={selectStyles}
+                          classNamePrefix="react-select"
+                          isDisabled={true} // Keep disabled for cash
+                        />
+                      )}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </form>

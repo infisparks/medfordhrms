@@ -1,3 +1,4 @@
+// components/InvoiceDownload.tsx
 "use client"
 
 import type React from "react"
@@ -35,7 +36,13 @@ interface Payment {
 
   paymentType: string
 
+  type: "advance" | "refund" // Kept for consistency, though 'amountType' is new primary
+
+  amountType: "advance" | "deposit" | "settlement" // NEW: amountType
+
   date: string
+
+  through?: string // Added 'through' field
 }
 
 export interface BillingRecord {
@@ -65,6 +72,8 @@ export interface BillingRecord {
   dischargeDate?: string
 
   amount: number
+
+  paymentType: string // This appears to be a leftover/duplicate, payments array is primary
 
   roomType?: string
 
@@ -213,7 +222,7 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
     await new Promise((resolve) => setTimeout(resolve, 100))
 
     const canvas = await html2canvas(invoiceRef.current, {
-      scale: 3,
+      scale: 4, // Increased scale for better resolution and text clarity
 
       useCORS: true,
 
@@ -507,17 +516,11 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
         <div className="text-[10px] text-gray-800 p-2 bg-transparent max-w-[520px]">
           {/* Header */}
 
-          {/* Bill Number at the top */}
-          {/* {record.billNumber && (
-            <div className="flex justify-between mb-1">
-              <div className="font-bold text-[12px] text-blue-900">Bill No: {record.billNumber}</div>
-            </div>
-          )} */}
+          
 
           <div className="flex justify-between mb-2">
-            {/* Removed space-y-[1px] for minimal spacing */}
-            <div className="flex flex-col"> 
-              {/* Adjusted Patient Name and UHID */}
+            {/* Left Column - Patient Details */}
+            <div className="flex flex-col flex-1 text-left pr-2"> {/* Added flex-1 and pr-2 for spacing */}
               <p>
                 <strong>Patient Name:</strong> {record.name} ({record.uhid})
               </p>
@@ -542,8 +545,8 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
               </p>
             </div>
 
-            {/* Removed space-y-[1px] for minimal spacing */}
-            <div className="text-right flex flex-col">
+            {/* Right Column - Dates and Other Info */}
+            <div className="text-right flex flex-col flex-1 pl-2"> {/* Added flex-1 and pl-2 for spacing */}
               <p>
                 <strong>Admit Date:</strong>{" "}
                 {record.admitDate ? (
@@ -661,60 +664,114 @@ export default function InvoiceDownload({ record, beds, doctors, children }: Inv
           </div>
 
           {/* Final Summary Section */}
+          {/* Adjusted to take less height and align amounts left */}
+          <div className="flex flex-col items-start mt-2 text-[8px] max-w-[520px] w-full">
+            <div className="grid grid-cols-2 gap-x-4 w-full">
+              <div className="flex flex-col space-y-0.5"> {/* Left side for amounts in words */}
+                {dueAmount > 0 && (
+                  <p>
+                    <strong>Due Amount in Words:</strong> {convertNumberToWords(dueAmount)} Rupees Only
+                  </p>
+                )}
 
-          <div className="mt-2 p-1 rounded text-[8px] w-[200px] ml-auto">
-            <p className="flex justify-between w-full">
-              <span>Total Amount:</span>
+                {dueAmount < 0 && (
+                  <p>
+                    <strong>Refund Amount in Words:</strong> {convertNumberToWords(Math.abs(dueAmount))} Rupees Only
+                  </p>
+                )}
+              </div>
 
-              <span>Rs. {subtotal.toLocaleString()}</span>
-            </p>
+              <div className="flex flex-col space-y-0.5 text-right"> {/* Right side for numerical summary */}
+                <p className="flex justify-between w-full">
+                  <span>Total Amount:</span>
+                  <span>Rs. {subtotal.toLocaleString()}</span>
+                </p>
 
-            {discount > 0 && (
-              <p className="flex justify-between w-full text-green-600 font-bold">
-                <span>Discount:</span>
+                {discount > 0 && (
+                  <p className="flex justify-between w-full text-green-600 font-bold">
+                    <span>Discount:</span>
+                    <span>- Rs. {discount.toLocaleString()}</span>
+                  </p>
+                )}
 
-                <span>- Rs. {discount.toLocaleString()}</span>
-              </p>
-            )}
+                <hr className="my-0.5 border-gray-300" />
 
-            <hr className="my-1" />
+                <p className="flex justify-between w-full font-bold">
+                  <span>Net Total:</span>
+                  <span>Rs. {netTotal.toLocaleString()}</span>
+                </p>
 
-            <p className="flex justify-between w-full font-bold">
-              <span>Net Total:</span>
+                <p className="flex justify-between w-full">
+                  <span>Total Amount:</span>
+                  <span>Rs. {deposit.toLocaleString()}</span>
+                </p>
 
-              <span>Rs. {netTotal.toLocaleString()}</span>
-            </p>
-
-            <p className="flex justify-between w-full">
-              <span>Deposit Amount:</span>
-
-              <span>Rs. {deposit.toLocaleString()}</span>
-            </p>
-
-            <p
-              className={`flex justify-between w-full font-semibold text-[8px] ${
-                dueAmount < 0 ? "text-blue-600" : "text-red-600"
-              }`}
-            >
-              <span>{dueAmount < 0 ? "Refund Amount:" : "Due Amount:"}</span>
-
-              <span>
-                {dueAmount < 0 ? "Rs. " + Math.abs(dueAmount).toLocaleString() : "Rs. " + dueAmount.toLocaleString()}
-              </span>
-            </p>
-
-            {dueAmount > 0 && (
-              <p className="mt-1 text-[8px] ">
-                <strong>Due Amount in Words:</strong> {convertNumberToWords(dueAmount)} Rupees Only
-              </p>
-            )}
-
-            {dueAmount < 0 && (
-              <p className="mt-1 text-[8px] text-black">
-                <strong>Refund Amount in Words:</strong> {convertNumberToWords(Math.abs(dueAmount))} Rupees Only
-              </p>
-            )}
+                <p
+                  className={`flex justify-between w-full font-semibold ${
+                    dueAmount < 0 ? "text-blue-600" : "text-red-600"
+                  }`}
+                >
+                  <span>{dueAmount < 0 ? "Refund Amount:" : "Due Amount:"}</span>
+                  <span>
+                    {dueAmount < 0 ? "Rs. " + Math.abs(dueAmount).toLocaleString() : "Rs. " + dueAmount.toLocaleString()}
+                  </span>
+                </p>
+              </div>
+            </div>
           </div>
+
+
+          {/* Payment History Section - Moved below Final Summary */}
+          {record.payments && record.payments.length > 0 && (
+            <div className="my-2 max-w-[520px] w-full">
+              <h3 className="font-semibold mb-1 text-[10px]">Payment History</h3>
+              <div className="flex">
+                <table className="w-full text-[7px]"> {/* Full width like service tables */}
+                  <thead>
+                  <tr className="">
+  {/* The vertical alignment should be on the <th> elements for table cells */}
+  <th className="py-0.5 px-1 text-left w-[120px]" style={{ verticalAlign: 'middle' }}>Remarks</th>
+  <th className="py-0.5 px-1 text-left" style={{ verticalAlign: 'middle' }}>Date</th>
+  <th className="py-0.5 px-1 text-left" style={{ verticalAlign: 'middle' }}>Type</th>
+  <th className="py-0.5 px-1 text-left" style={{ verticalAlign: 'middle' }}>Through</th>
+  <th className="py-0.5 px-1 text-right" style={{ verticalAlign: 'middle' }}>Amount (Rs)</th>
+</tr>
+                  </thead>
+                  <tbody>
+                    {record.payments.map((payment, idx) => {
+                      // Determine 'through' value if missing
+                      let displayThrough = payment.through;
+                      if (!displayThrough) {
+                        if (payment.paymentType === "cash") {
+                          displayThrough = "Cash";
+                        } else if (payment.paymentType === "online" || payment.paymentType === "card") {
+                          displayThrough = "Online";
+                        } else {
+                          displayThrough = "N/A";
+                        }
+                      }
+
+                      return (
+                        <tr key={idx}>
+                          <td className="py-0.5 px-1"></td> {/* Blank for remarks */}
+                          <td className="py-0.5 px-1">{formatDate(payment.date)}</td>
+                          <td className="py-0.5 px-1 capitalize">{payment.amountType}</td>
+                          <td className="py-0.5 px-1 capitalize">{displayThrough}</td>
+                          <td className="py-0.5 px-1 text-right">{payment.amount.toLocaleString()}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className=" font-bold">
+                      <td colSpan={4} className="py-1 px-1 text-right">Total Paid:</td> {/* Increased padding for total row */}
+                      <td className="py-1 px-1 text-right">Rs. {record.amount.toLocaleString()}</td> {/* Increased padding */}
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

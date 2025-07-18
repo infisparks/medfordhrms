@@ -1,3 +1,4 @@
+// components/BillingPage.tsx
 "use client"
 import React, { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
@@ -58,6 +59,7 @@ interface Payment {
   amount: number
   paymentType: string
   type: "advance" | "refund"
+  amountType: "advance" | "deposit" | "settlement"; // NEW: Added amountType
   date: string
   through?: string // Added 'through' field
 }
@@ -70,6 +72,7 @@ interface PaymentForm {
   paymentAmount: number
   paymentType: string
   type: string
+  amountType: "advance" | "deposit" | "settlement"; // NEW: Added amountType to form
   sendWhatsappNotification: boolean
   paymentDate: string
   through?: string // Made optional
@@ -147,6 +150,7 @@ const paymentSchema = yup
     paymentAmount: yup.number().required(),
     paymentType: yup.string().required(),
     type: yup.string().required(),
+    amountType: yup.string().oneOf(["advance", "deposit", "settlement"]).required(), // NEW: amountType validation
     sendWhatsappNotification: yup.boolean().required(),
     paymentDate: yup.string().required(),
     through: yup.string().when("paymentType", {
@@ -235,6 +239,7 @@ export default function BillingPage() {
       paymentAmount: 0,
       paymentType: "cash",
       type: "advance",
+      amountType: "deposit", // NEW: Default amountType
       sendWhatsappNotification: false,
       paymentDate: new Date().toISOString().slice(0, 10),
       through: "cash", // Default to 'cash' for 'cash' payment type
@@ -378,7 +383,7 @@ export default function BillingPage() {
           relativeAddress: infoData.relativeAddress || "",
           dischargeDate: infoData.dischargeDate || "",
           amount: 0,
-          paymentType: infoData.paymentType || "advance",
+          paymentType: infoData.paymentType || "advance", // This seems to be a placeholder, actual payments are in payments array
           roomType: infoData.roomType || "",
           bed: infoData.bed || "",
           services: [],
@@ -405,6 +410,7 @@ export default function BillingPage() {
                 amount: Number(billingData.payments[k].amount) || 0,
                 paymentType: billingData.payments[k].paymentType || "cash",
                 type: billingData.payments[k].type || "advance",
+                amountType: billingData.payments[k].amountType || "deposit", // NEW: Read amountType from Firebase
                 date: billingData.payments[k].date || new Date().toISOString(),
                 through: billingData.payments[k].through || "", // Read 'through' from Firebase
               }))
@@ -709,6 +715,7 @@ export default function BillingPage() {
         amount: Number(formData.paymentAmount),
         paymentType: formData.paymentType,
         type: formData.type as "advance" | "refund",
+        amountType: formData.amountType, // NEW: Save amountType
         date: isoDate,
         id: newRef.key!,
         through: formData.through, // Save 'through' field
@@ -744,6 +751,7 @@ export default function BillingPage() {
         paymentAmount: 0,
         paymentType: "cash",
         type: "advance",
+        amountType: "deposit", // NEW: Reset amountType
         sendWhatsappNotification: false,
         paymentDate: new Date().toISOString().slice(0, 10),
         through: "cash", // Reset to 'cash' after submission
@@ -1007,7 +1015,14 @@ export default function BillingPage() {
   }
 
   const getThroughOptions = () => {
-    if (watchPaymentType === "online" || watchPaymentType === "card") {
+    if (watchPaymentType === "cash") {
+      return (
+        <>
+          <option value="cash">Cash</option>
+          <option value="trust-cash">Trust Cash</option>
+        </>
+      );
+    } else if (watchPaymentType === "online" || watchPaymentType === "card") {
       return (
         <>
           <option value="">Select Option</option>
@@ -1016,10 +1031,11 @@ export default function BillingPage() {
           <option value="debit-card">Debit Card</option>
           <option value="netbanking">Net Banking</option>
           <option value="cheque">Cheque</option>
+          <option value="trust-online">Trust Online</option>
         </>
       );
     }
-    return <option value="cash">Cash</option>;
+    return <option value="">Select Option</option>; // Default for other types, though not expected based on schema
   };
 
   return (
@@ -1705,8 +1721,11 @@ export default function BillingPage() {
                                     Type
                                   </th>
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Amount Type {/* NEW: Added Amount Type header */}
+                                  </th>
+                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Through
-                                  </th>{/* New Table Header */}
+                                  </th>
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Date
                                   </th>
@@ -1727,8 +1746,11 @@ export default function BillingPage() {
                                     </td>
                                     <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.type}</td>
                                     <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                                      {payment.amountType} {/* NEW: Display amountType */}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 capitalize">
                                       {payment.through || "N/A"}
-                                    </td>{/* Display 'through' */}
+                                    </td>
                                     <td className="px-4 py-3 text-sm text-gray-500">
                                       {new Date(payment.date).toLocaleString()}
                                     </td>
@@ -1784,7 +1806,7 @@ export default function BillingPage() {
                                 <option value="">Select Payment Type</option>
                                 <option value="cash">Cash</option>
                                 <option value="online">Online</option>
-                             
+                                <option value="card">Card</option> {/* Added Card option */}
                               </select>
                               {errorsPayment.paymentType && (
                                 <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentType.message}</p>
@@ -1797,7 +1819,7 @@ export default function BillingPage() {
                                 className={`w-full px-3 py-2 rounded-lg border ${
                                   errorsPayment.through ? "border-red-500" : "border-gray-300"
                                 } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                                disabled={watchPaymentType === "cash"} // Disable if paymentType is cash
+                                disabled={watchPaymentType === "cash"} // Disable if paymentType is cash, but still allow selection from getThroughOptions()
                               >
                                 {getThroughOptions()}
                               </select>
@@ -1806,7 +1828,23 @@ export default function BillingPage() {
                               )}
                             </div>
                             <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Amount Type</label> {/* NEW: Amount Type dropdown */}
+                              <select
+                                {...registerPayment("amountType")}
+                                className={`w-full px-3 py-2 rounded-lg border ${
+                                  errorsPayment.amountType ? "border-red-500" : "border-gray-300"
+                                } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                              >
+                                <option value="deposit">Deposit</option>
+                                <option value="advance">Advance</option>
+                                <option value="settlement">Settlement</option>
+                              </select>
+                              {errorsPayment.amountType && (
+                                <p className="text-red-500 text-xs mt-1">{errorsPayment.amountType.message}</p>
+                              )}
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Payment For</label> {/* Renamed "Type" to "Payment For" */}
                               <select
                                 {...registerPayment("type")}
                                 className={`w-full px-3 py-2 rounded-lg border ${
@@ -2136,8 +2174,11 @@ export default function BillingPage() {
                             Type
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Amount Type {/* NEW: Added Amount Type header */}
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Through
-                          </th>{/* New Table Header in Modal */}
+                          </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Date
                           </th>
@@ -2156,8 +2197,11 @@ export default function BillingPage() {
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.paymentType}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.type}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              {payment.amountType} {/* NEW: Display amountType */}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
                               {payment.through || "N/A"}
-                            </td>{/* Display 'through' in Modal */}
+                            </td>
                             <td className="px-4 py-3 text-sm text-gray-500">
                               {new Date(payment.date).toLocaleString()}
                             </td>
