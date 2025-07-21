@@ -1,8 +1,8 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useState, useCallback } from "react"
-import { ref, onChildAdded, onChildChanged, onChildRemoved, get, remove } from "firebase/database"
+import { useEffect, useState, useCallback, useMemo } from "react" // Import useMemo
+import { ref, onChildAdded, onChildChanged, onChildRemoved, get, remove, query, orderByChild, startAt, endAt } from "firebase/database"
 import { db } from "@/lib/firebase"
 import { useRouter } from "next/navigation"
 import {
@@ -18,14 +18,19 @@ import {
   Stethoscope,
   Trash2,
   AlertCircle,
+  Calendar as CalendarIcon, // Renamed to avoid conflict with Calendar component
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { format, parseISO, isValid } from "date-fns"
+import { format, parseISO, isValid, startOfWeek, endOfWeek, subWeeks, addDays } from "date-fns" // Added date-fns functions
 import { ToastContainer, toast } from "react-toastify" // Ensure ToastContainer is imported
+
+// Date Picker imports
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css"; // Ensure DatePicker CSS is imported
 
 interface ServiceItem {
   serviceName: string
@@ -54,18 +59,19 @@ export interface BillingRecord {
   relativeName?: string
   relativePhone?: string
   relativeAddress?: string
-  dischargeDate?: string
-  admissionDate?: string
+  dischargeDate?: string // ISO string
+  admissionDate?: string // ISO string
   amount: number // totalDeposit or advanceDeposit
   roomType?: string
   bed?: string
   services: ServiceItem[]
   payments: Payment[]
   discount?: number
-  createdAt?: string
+  createdAt?: string // ISO string
+  billNumber?: string // <-- Add bill number to BillingRecord
 }
 
-const ITEMS_PER_PAGE = 20
+const ITEMS_PER_PAGE = 20 // Still relevant for initial load of discharged or pagination if implemented
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} bytes`
@@ -82,8 +88,12 @@ export default function OptimizedPatientsPage() {
   const [selectedWard, setSelectedWard] = useState("All")
   const [isLoading, setIsLoading] = useState(true)
   const [dischargedDataSize, setDischargedDataSize] = useState<number>(0)
-  const [hasLoadedDischarged, setHasLoadedDischarged] = useState<boolean>(false)
+  const [hasLoadedDischarged, setHasLoadedDischarged] = useState<boolean>(false) // Track if discharge data was loaded at least once
   const router = useRouter()
+
+  // Date Filter States
+  const [selectedDischargeDate, setSelectedDischargeDate] = useState<Date | null>(null) // Specific discharge date
+  const [selectedAdmissionDate, setSelectedAdmissionDate] = useState<Date | null>(null) // Specific admission date
 
   // State for cancellation modal
   const [showCancelModal, setShowCancelModal] = useState(false)
@@ -91,7 +101,15 @@ export default function OptimizedPatientsPage() {
   const [cancelError, setCancelError] = useState("")
   const [recordToCancel, setRecordToCancel] = useState<BillingRecord | null>(null)
 
-  // Combine IPD info and billing info into a single record (for discharge tab)
+  // Helper to format ISO date strings to yyyy-MM-dd
+  function getFirebaseDateKey(date?: string | Date | null): string {
+    if (!date) return ""
+    const d = typeof date === 'string' ? parseISO(date) : date;
+    if (!isValid(d)) return "";
+    return format(d, 'yyyy-MM-dd');
+  }
+
+  // Combine IPD info and billing info into a single record
   const combineRecordData = useCallback(
     (patientId: string, ipdId: string, ipdData: any, billingData: any): BillingRecord => {
       const servicesArray: ServiceItem[] = []
@@ -130,33 +148,29 @@ export default function OptimizedPatientsPage() {
         relativeName: ipdData.relativeName || "",
         relativePhone: ipdData.relativePhone || "",
         relativeAddress: ipdData.relativeAddress || "",
-        dischargeDate: ipdData.dischargeDate || "",
-        admissionDate: ipdData.admissionDate || "",
+        dischargeDate: ipdData.dischargeDate || "", // This is the actual discharge date
+        admissionDate: ipdData.admitDate || "", // This is the admission date
         amount: billingData?.totalDeposit ? Number(billingData.totalDeposit) : 0,
-        roomType: ipdData.roomType || "",
+        roomType: ipdData.ward || "", // Use 'ward' from ipdData
         bed: ipdData.bed || "",
         services: servicesArray,
         payments: paymentsArray,
         discount: ipdData.discount ? Number(ipdData.discount) : 0,
         createdAt: ipdData.createdAt || "",
+        billNumber: billingData?.billNumber || ipdData?.billNumber || "", // <-- Prefer billingData, fallback to ipdData
       }
     },
     [],
   )
 
-  function getAdmitDateKey(dateStr?: string) {
-    if (!dateStr) return ""
-    const date = typeof dateStr === "string" ? parseISO(dateStr) : dateStr
-    if (!isValid(date)) return ""
-    return format(date, "yyyy-MM-dd")
-  }
-
   // Active (non-discharge) patients: only fetch from /patients/ipdactive
+  // This listener is always active for the active tab
   useEffect(() => {
-    if (selectedTab !== "non-discharge") return
-    setIsLoading(true)
+    // Clear any previous listeners for active records if state changes
     const ipdActiveRef = ref(db, "patients/ipdactive")
-    setActiveIpdRecords([])
+    setActiveIpdRecords([]); // Clear previous records
+    setIsLoading(true);
+
     const handleAdd = onChildAdded(ipdActiveRef, (snapshot) => {
       const data = snapshot.val()
       if (!data) return
@@ -174,7 +188,7 @@ export default function OptimizedPatientsPage() {
             bed: data.bed || "",
             amount: data.advanceDeposit || 0,
             admissionDate: data.admitDate || "",
-            dischargeDate: "",
+            dischargeDate: "", // Active patients don't have a discharge date yet
             services: [],
             payments: [],
           },
@@ -210,145 +224,208 @@ export default function OptimizedPatientsPage() {
       handleAdd()
       handleChange()
       handleRemove()
-      setActiveIpdRecords([])
+      // Do not clear activeIpdRecords here, as it's needed for overall filtering later.
     }
-  }, [selectedTab])
+  }, []) // No dependencies means it runs once on mount and sets up listeners
 
-  // Fetch latest 20 discharged IPD records ONLY when going to the discharge tab
+  // Load Discharged Patients based on selected date filters or default to this week
   const loadDischargedPatients = useCallback(async () => {
     setIsLoading(true)
+    setDischargedRecords([]) // Clear previous discharged records
     setDischargedDataSize(0)
+
+    let queryDateStart: Date;
+    let queryDateEnd: Date;
+    let filterByDischargeDate = false; // Flag to indicate if we're filtering by dischargeDate
+
+    if (selectedAdmissionDate) {
+        // If admission date is selected, query that specific admission date
+        queryDateStart = selectedAdmissionDate;
+        queryDateEnd = selectedAdmissionDate;
+        filterByDischargeDate = false; // We're querying by admission date, not discharge date
+    } else if (selectedDischargeDate) {
+        // If specific discharge date is selected, query a broad range of admission dates
+        // to find patients discharged on this date.
+        // A full year range for admission dates.
+        queryDateStart = new Date(selectedDischargeDate.getFullYear(), 0, 1);
+        queryDateEnd = new Date(selectedDischargeDate.getFullYear(), 11, 31);
+        filterByDischargeDate = true; // We will filter by discharge date after fetching
+    } else { // Default: This week's discharged (filter by dischargeDate)
+        queryDateEnd = new Date(); // Today
+        queryDateStart = startOfWeek(queryDateEnd, { weekStartsOn: 1 }); // Monday of this week
+        filterByDischargeDate = true;
+    }
+
     try {
-      // Fetch userinfoipd (just for discharged)
-      const ipdRef = ref(db, "patients/ipddetail/userinfoipd")
-      const snap = await get(ipdRef)
-      const dischargedArr: {
-        patientId: string
-        ipdId: string
-        ipdData: any
-        dischargeDate: string
-        dateKey: string
-      }[] = []
-      let sizeUserInfoIpd = 0
-      if (snap.exists()) {
-        const allDates = snap.val()
-        const rawDataUserInfoIpd: any[] = []
-        Object.keys(allDates).forEach((dateKey) => {
-          const datePatients = allDates[dateKey]
-          Object.keys(datePatients).forEach((patientId) => {
-            const patientIpds = datePatients[patientId]
-            Object.keys(patientIpds).forEach((ipdId) => {
-              const ipdData = patientIpds[ipdId]
-              if (ipdData && ipdData.dischargeDate) {
-                dischargedArr.push({
-                  patientId,
-                  ipdId,
-                  ipdData,
-                  dischargeDate: ipdData.dischargeDate,
-                  dateKey,
-                })
-                rawDataUserInfoIpd.push(ipdData)
-              }
-            })
-          })
-        })
-        // Calculate size of userinfoipd discharged
-        sizeUserInfoIpd = JSON.stringify(rawDataUserInfoIpd).length
-        // Sort by dischargeDate desc, take latest 20
-        dischargedArr.sort((a, b) => {
-          return new Date(b.dischargeDate).getTime() - new Date(a.dischargeDate).getTime()
-        })
-        const top20 = dischargedArr.slice(0, ITEMS_PER_PAGE)
-        // Fetch billing for each record
-        let sizeBilling = 0
-        const billingSnapshots = await Promise.all(
-          top20.map(({ dateKey, patientId, ipdId }) =>
-            get(ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}`)),
-          ),
-        )
-        const billingDataArr: any[] = []
-        const dischargedRecords: BillingRecord[] = top20.map((entry, idx) => {
-          const billingData = billingSnapshots[idx].exists() ? billingSnapshots[idx].val() : {}
-          billingDataArr.push(billingData)
-          return combineRecordData(entry.patientId, entry.ipdId, entry.ipdData, billingData)
-        })
-        // Calculate total downloaded size
-        sizeBilling = JSON.stringify(billingDataArr).length
-        setDischargedDataSize(sizeUserInfoIpd + sizeBilling)
-        setDischargedRecords(dischargedRecords)
-      } else {
-        setDischargedDataSize(0)
-        setDischargedRecords([])
-      }
+        const fetchPromises: Promise<any>[] = [];
+        const fetchedRawIpdData: { patientId: string; ipdId: string; ipdData: any; dateKey: string }[] = [];
+        let totalBytesFetched = 0;
+
+        // Iterate through the determined date range for admission dates
+        let currentDate = queryDateStart;
+        while (currentDate <= queryDateEnd) {
+            const admitDateKey = getFirebaseDateKey(currentDate);
+            const admittedRef = ref(db, `patients/ipddetail/userinfoipd/${admitDateKey}`);
+            fetchPromises.push(get(admittedRef).then(snap => {
+                if (snap.exists()) {
+                    const dateData = snap.val();
+                    totalBytesFetched += JSON.stringify(dateData).length;
+                    Object.keys(dateData).forEach(patientId => {
+                        Object.keys(dateData[patientId]).forEach(ipdId => {
+                            fetchedRawIpdData.push({
+                                patientId,
+                                ipdId,
+                                ipdData: dateData[patientId][ipdId],
+                                dateKey: admitDateKey, // Admission date key
+                            });
+                        });
+                    });
+                }
+            }));
+            currentDate = addDays(currentDate, 1);
+        }
+
+        await Promise.all(fetchPromises); // Wait for all IPD info to fetch
+
+        const billingPromises: Promise<any>[] = [];
+        const billingMap = new Map<string, any>(); // Map to store billing data by ipdId for later combination
+
+        for (const entry of fetchedRawIpdData) {
+            if (entry.ipdData.dischargeDate) { // Only fetch billing for discharged records
+                const billingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${entry.dateKey}/${entry.patientId}/${entry.ipdId}`);
+                billingPromises.push(get(billingRef).then(snap => {
+                    const billingVal = snap.exists() ? snap.val() : {};
+                    totalBytesFetched += JSON.stringify(billingVal).length;
+                    billingMap.set(entry.ipdId, billingVal);
+                }));
+            }
+        }
+
+        await Promise.all(billingPromises); // Wait for all billing data to fetch
+
+        let tempDischargedRecords: BillingRecord[] = fetchedRawIpdData
+            .filter(entry => entry.ipdData.dischargeDate) // Ensure it's discharged
+            .map(entry => combineRecordData(
+                entry.patientId,
+                entry.ipdId,
+                entry.ipdData,
+                billingMap.get(entry.ipdId) || {}
+            ));
+
+        // Apply discharge date filter if needed
+        if (filterByDischargeDate) {
+            tempDischargedRecords = tempDischargedRecords.filter(record => {
+                const dischargeDate = parseISO(record.dischargeDate || '');
+                if (!isValid(dischargeDate)) return false;
+
+                if (selectedDischargeDate) {
+                    return getFirebaseDateKey(dischargeDate) === getFirebaseDateKey(selectedDischargeDate);
+                } else { // Default: This week's discharge
+                    return dischargeDate >= startOfWeek(new Date(), { weekStartsOn: 1 }) && dischargeDate <= endOfWeek(new Date(), { weekStartsOn: 1 });
+                }
+            });
+        }
+        // If selectedAdmissionDate, it's already implicitly filtered by the initial query range.
+
+        setDischargedRecords(tempDischargedRecords);
+        setDischargedDataSize(totalBytesFetched);
+        setHasLoadedDischarged(true);
     } catch (err) {
       setDischargedDataSize(0)
       setDischargedRecords([])
       console.error("Error loading discharged patients:", err)
+      toast.error("Failed to load discharged patients.")
     } finally {
       setIsLoading(false)
-      setHasLoadedDischarged(true)
     }
-  }, [combineRecordData])
+  }, [combineRecordData, selectedDischargeDate, selectedAdmissionDate]);
 
-  // Only fetch when going to discharge tab and NOT already loaded
+  // Effect to trigger loading of discharged patients when tab is selected or date filters change
   useEffect(() => {
-    if (selectedTab === "discharge" && !hasLoadedDischarged) {
-      loadDischargedPatients()
+    // Only load discharged if on the discharge tab OR if an admission date is specifically selected.
+    // If an admission date is selected, it will affect *both* active and discharged records,
+    // so we call loadDischargedPatients to get the relevant discharged ones.
+    if (selectedTab === "discharge" || selectedAdmissionDate) {
+      loadDischargedPatients();
+    } else if (selectedTab === "non-discharge" && !selectedAdmissionDate) {
+        // If on non-discharge tab and no admission date filter, ensure discharged records are cleared
+        // or set to their default "this week" view by calling loadDischargedPatients with null filters.
+        // This avoids stale data if user switches back and forth without re-filtering.
+        if (dischargedRecords.length > 0 || hasLoadedDischarged) { // Only clear if there's data or it was loaded
+            setDischargedRecords([]);
+            setDischargedDataSize(0);
+            setHasLoadedDischarged(false); // Reset to ensure reload if discharge tab is selected later
+        }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTab, loadDischargedPatients])
+  }, [selectedTab, selectedDischargeDate, selectedAdmissionDate, loadDischargedPatients, dischargedRecords.length, hasLoadedDischarged]);
 
-  // Filter records based on tab, search, ward
+
+  // Filter records based on tab, search, ward, and date filters
   useEffect(() => {
     let records: BillingRecord[] = []
-    if (selectedTab === "non-discharge") {
-      records = activeIpdRecords
+
+    if (selectedAdmissionDate) {
+        // If an admission date is selected, filter across ALL active and discharged records by that admission date
+        const admitDateKey = getFirebaseDateKey(selectedAdmissionDate);
+        records = [...activeIpdRecords, ...dischargedRecords].filter(
+            (rec: BillingRecord) => getFirebaseDateKey(rec.admissionDate) === admitDateKey
+        );
     } else {
-      records = dischargedRecords
+        // If no admission date is selected, use the tab-specific logic
+        if (selectedTab === "non-discharge") {
+            records = activeIpdRecords;
+        } else { // selectedTab === "discharge"
+            // Discharged records are already filtered by loadDischargedPatients for discharge date or this week
+            records = dischargedRecords;
+        }
     }
-    const term = searchTerm.trim().toLowerCase()
-    if (selectedWard !== "All") {
-      records = records.filter((rec) => rec.roomType && rec.roomType.toLowerCase() === selectedWard.toLowerCase())
-    }
+
+    const term = searchTerm.trim().toLowerCase();
     if (term) {
       records = records.filter(
         (rec) =>
           rec.ipdId.toLowerCase().includes(term) ||
           rec.name.toLowerCase().includes(term) ||
           rec.mobileNumber.toLowerCase().includes(term) ||
-          (rec.uhid && rec.uhid.toLowerCase().includes(term)), // Include UHID in search
-      )
+          (rec.uhid && rec.uhid.toLowerCase().includes(term)),
+      );
     }
-    setFilteredRecords(records)
-  }, [selectedTab, searchTerm, selectedWard, activeIpdRecords, dischargedRecords])
+
+    if (selectedWard !== "All") {
+      records = records.filter((rec: BillingRecord) => rec.roomType && rec.roomType.toLowerCase() === selectedWard.toLowerCase()) // Explicitly type 'rec'
+    }
+    
+    setFilteredRecords(records);
+  }, [selectedTab, searchTerm, selectedWard, activeIpdRecords, dischargedRecords, selectedAdmissionDate]);
+
 
   // Event handlers
   const handleRowClick = (record: BillingRecord) => {
-    const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
+    const admitDateKey = getFirebaseDateKey(record.admissionDate || record.createdAt)
     router.push(`/billing/${record.patientId}/${record.ipdId}/${admitDateKey}`)
   }
 
   const handleEditRecord = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
-    const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
+    const admitDateKey = getFirebaseDateKey(record.admissionDate || record.createdAt)
     router.push(`/billing/edit/${record.patientId}/${record.ipdId}/${admitDateKey}`)
   }
 
   const handleManagePatient = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
-    const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
+    const admitDateKey = getFirebaseDateKey(record.admissionDate || record.createdAt)
     router.push(`/manage/${record.patientId}/${record.ipdId}`)
   }
 
   const handleDrugChart = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
-    const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
+    const admitDateKey = getFirebaseDateKey(record.admissionDate || record.createdAt)
     router.push(`/drugchart/${record.patientId}/${record.ipdId}`)
   }
 
   const handleOTForm = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
-    const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
+    const admitDateKey = getFirebaseDateKey(record.admissionDate || record.createdAt)
     router.push(`/ot/${record.patientId}/${record.ipdId}/${admitDateKey}`)
   }
 
@@ -376,7 +453,7 @@ export default function OptimizedPatientsPage() {
     setIsLoading(true) // Show loading state during deletion
     try {
       const { patientId, ipdId, admissionDate, createdAt } = recordToCancel
-      const dateKey = getAdmitDateKey(admissionDate || createdAt)
+      const dateKey = getFirebaseDateKey(admissionDate || createdAt)
 
       // 1. Delete from /patients/ipdactive/{ipdId}
       await remove(ref(db, `patients/ipdactive/${ipdId}`))
@@ -413,8 +490,11 @@ export default function OptimizedPatientsPage() {
   }
 
   // Get unique ward names from current records
-  const allRecords = [...activeIpdRecords, ...dischargedRecords]
-  const uniqueWards = Array.from(new Set(allRecords.map((record) => record.roomType).filter((ward) => ward)))
+  const allRecordsForWardFilter = useMemo(() => [...activeIpdRecords, ...dischargedRecords], [activeIpdRecords, dischargedRecords]);
+  const uniqueWards = useMemo(
+    () => Array.from(new Set(allRecordsForWardFilter.map((record: BillingRecord) => record.roomType).filter((ward): ward is string => ward !== undefined && ward !== null))), // Explicitly type 'ward' and use type guard
+    [allRecordsForWardFilter]
+);
 
   // Summary stats
   const totalPatients = filteredRecords.length
@@ -422,9 +502,37 @@ export default function OptimizedPatientsPage() {
 
   // Manual reload for discharge
   function reloadDischargeTab() {
-    setHasLoadedDischarged(false)
-    loadDischargedPatients()
+    setHasLoadedDischarged(false) // Force reload
+    setSelectedDischargeDate(null); // Clear discharge date filter
+    setSelectedAdmissionDate(null); // Clear admission date filter
+    loadDischargedPatients();
   }
+
+  // Handle date picker changes
+  const handleDischargeDateChange = (date: Date | null) => {
+    setSelectedDischargeDate(date);
+    setSelectedAdmissionDate(null); // Clear admission date filter if discharge date is set
+    setSearchTerm(""); // Clear search term
+  };
+
+  const handleAdmissionDateChange = (date: Date | null) => {
+    setSelectedAdmissionDate(date);
+    setSelectedDischargeDate(null); // Clear discharge date filter if admission date is set
+    setSearchTerm(""); // Clear search term
+  };
+
+  const clearDateFilters = () => {
+    setSelectedDischargeDate(null);
+    setSelectedAdmissionDate(null);
+    setSearchTerm(""); // Clear search term
+    setSelectedWard("All"); // Reset ward filter
+    // If on discharge tab, reload to default "this week"
+    if (selectedTab === "discharge") {
+        setHasLoadedDischarged(false);
+        loadDischargedPatients();
+    }
+  };
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -466,7 +574,12 @@ export default function OptimizedPatientsPage() {
             <Tabs
               defaultValue="non-discharge"
               value={selectedTab}
-              onValueChange={(value) => setSelectedTab(value as "non-discharge" | "discharge")}
+              onValueChange={(value) => {
+                setSelectedTab(value as "non-discharge" | "discharge");
+                setSelectedDischargeDate(null); // Clear specific date filter when changing tabs
+                setSelectedAdmissionDate(null); // Clear specific date filter when changing tabs
+                setSearchTerm(""); // Clear search term
+              }}
             >
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
                 <div className="overflow-x-auto">
@@ -493,11 +606,46 @@ export default function OptimizedPatientsPage() {
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search by name, ID or mobile"
+                    placeholder="Search by name, ID, UHID or mobile"
                     className="pl-10 w-full md:w-80"
                   />
                 </div>
               </div>
+
+              {/* Date Filters and Clear Button */}
+              <div className="flex flex-wrap items-center gap-4 mb-6">
+                <div className="flex items-center gap-2">
+                  <CalendarIcon className="h-4 w-4 text-slate-500" />
+                  <span className="font-medium text-slate-700">Discharge Date:</span>
+                  <DatePicker
+                    selected={selectedDischargeDate}
+                    onChange={handleDischargeDateChange}
+                    dateFormat="dd/MM/yyyy"
+                    placeholderText="Select Discharge Date"
+                    className="border rounded-md px-3 py-1 w-36"
+                    isClearable
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <CalendarIcon className="h-4 w-4 text-slate-500" />
+                  <span className="font-medium text-slate-700">Admission Date:</span>
+                  <DatePicker
+                    selected={selectedAdmissionDate}
+                    onChange={handleAdmissionDateChange}
+                    dateFormat="dd/MM/yyyy"
+                    placeholderText="Select Admission Date"
+                    className="border rounded-md px-3 py-1 w-36"
+                    isClearable
+                  />
+                </div>
+                {(selectedDischargeDate || selectedAdmissionDate || searchTerm || selectedWard !== "All") && (
+                    <Button variant="outline" size="sm" onClick={clearDateFilters} className="text-red-500 border-red-200 hover:bg-red-50">
+                        Clear All Filters
+                    </Button>
+                )}
+              </div>
+
+              {/* Ward Filter */}
               <div className="mb-6">
                 <div className="flex items-center gap-2 mb-2">
                   <Home className="h-4 w-4 text-slate-500" />
@@ -511,18 +659,19 @@ export default function OptimizedPatientsPage() {
                   >
                     All Wards
                   </Badge>
-                  {uniqueWards.map((ward) => (
+                  {uniqueWards.map((ward: string) => ( // Explicitly type 'ward'
                     <Badge
                       key={ward}
                       variant={selectedWard === ward ? "default" : "outline"}
                       className="cursor-pointer"
-                      onClick={() => setSelectedWard(ward ?? "")}
+                      onClick={() => setSelectedWard(ward)} // 'ward' is now guaranteed to be string
                     >
                       {ward}
                     </Badge>
                   ))}
                 </div>
               </div>
+
               <TabsContent value="non-discharge" className="mt-0">
                 {renderPatientsTable(
                   filteredRecords,
@@ -541,7 +690,7 @@ export default function OptimizedPatientsPage() {
                     Data downloaded: <b>{formatBytes(dischargedDataSize)}</b>
                   </span>
                   <Button variant="outline" size="sm" onClick={reloadDischargeTab}>
-                    Reload
+                    Reload Discharged Data
                   </Button>
                 </div>
                 {renderPatientsTable(
