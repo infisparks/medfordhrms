@@ -1052,7 +1052,7 @@ export default function BillingPage() {
               <ArrowLeft size={18} className="mr-2" /> Back to Patients
             </button>
             <div className="flex items-center space-x-4">
-              {selectedRecord && !selectedRecord.dischargeDate && (
+              {selectedRecord && (
                 <button
                   onClick={handleDischarge}
                   disabled={loading}

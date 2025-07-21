@@ -22,6 +22,8 @@ import { ToastContainer, toast } from "react-toastify";
 import { format, parseISO } from "date-fns";
 import { motion } from "framer-motion";
 import "react-toastify/dist/ReactToastify.css";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
 interface DischargeData {
   finalDiagnosis?: string;
@@ -83,6 +85,9 @@ export default function DischargeSummaryPage() {
 
   /* Refs for enabling Ctrl+B → **bold** in <textarea> */
   const textRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
+
+  const [editingDischargeDate, setEditingDischargeDate] = useState(false);
+  const [newDischargeDate, setNewDischargeDate] = useState<Date | null>(null);
 
   /* ─── Step 1: load the static “beds” tree for bed‐number lookups ────────────────── */
   useEffect(() => {
@@ -297,6 +302,23 @@ export default function DischargeSummaryPage() {
     }
   };
   
+  const handleUpdateDischargeDate = async () => {
+    if (!patientRecord || !newDischargeDate) return;
+    setSaving(true);
+    try {
+      await update(
+        ref(db, `patients/ipddetail/userinfoipd/${admitDateKey}/${patientId}/${ipdId}`),
+        { dischargeDate: newDischargeDate.toISOString() }
+      );
+      setRec({ ...patientRecord, dischargeDate: newDischargeDate.toISOString() });
+      toast.success("Discharge date updated");
+      setEditingDischargeDate(false);
+    } catch (e) {
+      toast.error("Failed to update discharge date");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   /* ─── Step 6: if we don’t yet have `patientRecord`, show spinner ───────────────────────────────── */
   if (!patientRecord) {
@@ -549,7 +571,41 @@ export default function DischargeSummaryPage() {
                               parseISO(patientRecord.dischargeDate),
                               "MMM dd, yyyy 'at' HH:mm"
                             )}
+                            <button
+                              className="ml-2 text-blue-600 underline text-xs"
+                              onClick={() => {
+                                setEditingDischargeDate(true);
+                                setNewDischargeDate(new Date(patientRecord.dischargeDate!));
+                              }}
+                            >
+                              Edit
+                            </button>
                           </p>
+                          {editingDischargeDate && (
+                            <div className="mt-2 flex items-center gap-2">
+                              <DatePicker
+                                selected={newDischargeDate}
+                                onChange={setNewDischargeDate}
+                                showTimeSelect
+                                dateFormat="Pp"
+                                className="border px-2 py-1 rounded"
+                              />
+                              <button
+                                className="px-2 py-1 bg-blue-600 text-white rounded"
+                                onClick={handleUpdateDischargeDate}
+                                disabled={saving}
+                              >
+                                {saving ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                className="px-2 py-1 bg-gray-200 text-gray-700 rounded"
+                                onClick={() => setEditingDischargeDate(false)}
+                                disabled={saving}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ) : (
