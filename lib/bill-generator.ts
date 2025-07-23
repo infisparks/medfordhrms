@@ -27,5 +27,5 @@ export async function generateNextBillNumber(): Promise<string> {
   // Removed the datePrefix
   const formattedCounter = String(nextCounterValue).padStart(4, "0"); // e.g., 0001
 
-  return `B${formattedCounter}`; // Simplified format
+  return `MF${formattedCounter}`; // Simplified format
 }

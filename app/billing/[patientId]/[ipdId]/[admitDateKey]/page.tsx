@@ -59,9 +59,10 @@ interface Payment {
   amount: number
   paymentType: string
   type: "advance" | "refund"
-  amountType: "advance" | "deposit" | "settlement"; // NEW: Added amountType
+  amountType: "advance" | "deposit" | "settlement"
   date: string
-  through?: string // Added 'through' field
+  through?: string
+  remark: string | null // NEW: Add remark field, string or null
 }
 interface AdditionalServiceForm {
   serviceName: string
@@ -72,10 +73,11 @@ interface PaymentForm {
   paymentAmount: number
   paymentType: string
   type: string
-  amountType: "advance" | "deposit" | "settlement"; // NEW: Added amountType to form
+  amountType: "advance" | "deposit" | "settlement"
   sendWhatsappNotification: boolean
   paymentDate: string
-  through?: string // Made optional
+  through?: string
+  remark: string | null // NEW: Add remark field, string or null
 }
 interface DiscountForm {
   discount: number
@@ -150,7 +152,7 @@ const paymentSchema = yup
     paymentAmount: yup.number().required(),
     paymentType: yup.string().required(),
     type: yup.string().required(),
-    amountType: yup.string().oneOf(["advance", "deposit", "settlement"]).required(), // NEW: amountType validation
+    amountType: yup.mixed<"advance" | "deposit" | "settlement">().oneOf(["advance", "deposit", "settlement"]).required(),
     sendWhatsappNotification: yup.boolean().required(),
     paymentDate: yup.string().required(),
     through: yup.string().when("paymentType", {
@@ -158,6 +160,7 @@ const paymentSchema = yup
       then: (schema) => schema.required("Through is required for online/card payments"),
       otherwise: (schema) => schema.notRequired(),
     }),
+    remark: yup.string().max(100, "Remark too long").nullable().default("").notRequired(),
   })
   .required()
 const discountSchema = yup
@@ -239,10 +242,11 @@ export default function BillingPage() {
       paymentAmount: 0,
       paymentType: "cash",
       type: "advance",
-      amountType: "deposit", // NEW: Default amountType
+      amountType: "deposit",
       sendWhatsappNotification: false,
       paymentDate: new Date().toISOString().slice(0, 10),
-      through: "cash", // Default to 'cash' for 'cash' payment type
+      through: "cash",
+      remark: "", // NEW: Default value for remark
     },
   })
   const {
@@ -413,6 +417,7 @@ export default function BillingPage() {
                 amountType: billingData.payments[k].amountType || "deposit", // NEW: Read amountType from Firebase
                 date: billingData.payments[k].date || new Date().toISOString(),
                 through: billingData.payments[k].through || "", // Read 'through' from Firebase
+                remark: billingData.payments[k].remark || "", // NEW: Read remark from Firebase
               }))
             : []
           const depositTotal = Number(billingData.totalDeposit) || 0
@@ -715,10 +720,11 @@ export default function BillingPage() {
         amount: Number(formData.paymentAmount),
         paymentType: formData.paymentType,
         type: formData.type as "advance" | "refund",
-        amountType: formData.amountType, // NEW: Save amountType
+        amountType: formData.amountType,
         date: isoDate,
         id: newRef.key!,
-        through: formData.through, // Save 'through' field
+        through: formData.through,
+        remark: formData.remark, // NEW: Save remark
       }
       await update(newRef, newPayment)
 
@@ -751,10 +757,11 @@ export default function BillingPage() {
         paymentAmount: 0,
         paymentType: "cash",
         type: "advance",
-        amountType: "deposit", // NEW: Reset amountType
+        amountType: "deposit",
         sendWhatsappNotification: false,
         paymentDate: new Date().toISOString().slice(0, 10),
-        through: "cash", // Reset to 'cash' after submission
+        through: "cash",
+        remark: "", // NEW: Reset remark
       })
     } catch (error) {
       console.error("Error recording payment:", error)
@@ -1250,7 +1257,17 @@ export default function BillingPage() {
                       <h3 className="text-lg font-semibold text-gray-800 mb-3">Quick Actions</h3>
                       <div className="space-y-3">
                         {/* Preview Bill */}
-                        <InvoiceDownload record={selectedRecord} beds={beds} doctors={doctors}>
+                        <InvoiceDownload
+                          record={{
+                            ...selectedRecord,
+                            payments: selectedRecord.payments?.map((p) => ({
+                              ...p,
+                              remark: p.remark === null ? undefined : p.remark,
+                            })),
+                          }}
+                          beds={beds}
+                          doctors={doctors}
+                        >
                           <button
                             type="button"
                             className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
@@ -1779,21 +1796,38 @@ export default function BillingPage() {
                             <CreditCard size={16} className="mr-2 text-teal-600" /> Record Payment
                           </h3>
                           <form onSubmit={handleSubmitPayment(onSubmitPayment)} className="space-y-4">
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Payment Amount (₹)
-                              </label>
-                              <input
-                                type="number"
-                                {...registerPayment("paymentAmount")}
-                                placeholder="e.g., 5000"
-                                className={`w-full px-3 py-2 rounded-lg border ${
-                                  errorsPayment.paymentAmount ? "border-red-500" : "border-gray-300"
-                                } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                              />
-                              {errorsPayment.paymentAmount && (
-                                <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentAmount.message}</p>
-                              )}
+                            <div className="flex gap-2 items-end">
+                              <div className="flex-1">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Payment Amount (₹)
+                                </label>
+                                <input
+                                  type="number"
+                                  {...registerPayment("paymentAmount")}
+                                  placeholder="e.g., 5000"
+                                  className={`w-full px-3 py-2 rounded-lg border ${
+                                    errorsPayment.paymentAmount ? "border-red-500" : "border-gray-300"
+                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                                />
+                                {errorsPayment.paymentAmount && (
+                                  <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentAmount.message}</p>
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Remark</label>
+                                <input
+                                  type="text"
+                                  {...registerPayment("remark")}
+                                  placeholder="Add remark (optional)"
+                                  maxLength={100}
+                                  className={`w-full px-3 py-2 rounded-lg border ${
+                                    errorsPayment.remark ? "border-red-500" : "border-gray-300"
+                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                                />
+                                {errorsPayment.remark && (
+                                  <p className="text-red-500 text-xs mt-1">{errorsPayment.remark.message}</p>
+                                )}
+                              </div>
                             </div>
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-1">Payment Type</label>
