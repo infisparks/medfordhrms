@@ -1,8 +1,9 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useState, useCallback, useMemo } from "react" // Import useMemo
-import { ref, onChildAdded, onChildChanged, onChildRemoved, get, remove, query, orderByChild, startAt, endAt } from "firebase/database"
+import { useEffect, useState, useCallback, useMemo } from "react"
+// Use 'update' for atomic multi-path writes
+import { ref, onChildAdded, onChildChanged, onChildRemoved, get, update } from "firebase/database"
 import { db } from "@/lib/firebase"
 import { useRouter } from "next/navigation"
 import {
@@ -18,19 +19,19 @@ import {
   Stethoscope,
   Trash2,
   AlertCircle,
-  Calendar as CalendarIcon, // Renamed to avoid conflict with Calendar component
+  Calendar as CalendarIcon,
+  RefreshCw, // Icon for reload button
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { format, parseISO, isValid, startOfWeek, endOfWeek, subWeeks, addDays } from "date-fns" // Added date-fns functions
-import { ToastContainer, toast } from "react-toastify" // Ensure ToastContainer is imported
+import { format, parseISO, isValid, subWeeks, addDays } from "date-fns"
+import { ToastContainer, toast } from "react-toastify"
 
-// Date Picker imports
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css"; // Ensure DatePicker CSS is imported
+import DatePicker from "react-datepicker"
+import "react-datepicker/dist/react-datepicker.css"
 
 interface ServiceItem {
   serviceName: string
@@ -68,10 +69,8 @@ export interface BillingRecord {
   payments: Payment[]
   discount?: number
   createdAt?: string // ISO string
-  billNumber?: string // <-- Add bill number to BillingRecord
+  billNumber?: string
 }
-
-const ITEMS_PER_PAGE = 20 // Still relevant for initial load of discharged or pagination if implemented
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} bytes`
@@ -81,19 +80,20 @@ function formatBytes(bytes: number) {
 
 export default function OptimizedPatientsPage() {
   const [activeIpdRecords, setActiveIpdRecords] = useState<BillingRecord[]>([])
-  const [dischargedRecords, setDischargedRecords] = useState<BillingRecord[]>([])
+  // RENAMED for clarity: this holds all detailed records fetched by admission date, not just discharged ones.
+  const [detailedRecords, setDetailedRecords] = useState<BillingRecord[]>([])
   const [filteredRecords, setFilteredRecords] = useState<BillingRecord[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedTab, setSelectedTab] = useState<"non-discharge" | "discharge">("non-discharge")
   const [selectedWard, setSelectedWard] = useState("All")
   const [isLoading, setIsLoading] = useState(true)
-  const [dischargedDataSize, setDischargedDataSize] = useState<number>(0)
-  const [hasLoadedDischarged, setHasLoadedDischarged] = useState<boolean>(false) // Track if discharge data was loaded at least once
+  // RENAMED for clarity
+  const [detailedDataSize, setDetailedDataSize] = useState<number>(0)
+  const [hasLoadedDetails, setHasLoadedDetails] = useState<boolean>(false)
   const router = useRouter()
 
   // Date Filter States
-  const [selectedDischargeDate, setSelectedDischargeDate] = useState<Date | null>(null) // Specific discharge date
-  const [selectedAdmissionDate, setSelectedAdmissionDate] = useState<Date | null>(null) // Specific admission date
+  const [selectedAdmissionDate, setSelectedAdmissionDate] = useState<Date | null>(null)
 
   // State for cancellation modal
   const [showCancelModal, setShowCancelModal] = useState(false)
@@ -101,12 +101,18 @@ export default function OptimizedPatientsPage() {
   const [cancelError, setCancelError] = useState("")
   const [recordToCancel, setRecordToCancel] = useState<BillingRecord | null>(null)
 
+  // Add state for search input, search results, and search loading
+  const [archiveSearchInput, setArchiveSearchInput] = useState("")
+  const [archiveSearchResults, setArchiveSearchResults] = useState<BillingRecord[]>([])
+  const [archiveSearchLoading, setArchiveSearchLoading] = useState(false)
+  const [archiveSearchError, setArchiveSearchError] = useState("")
+
   // Helper to format ISO date strings to yyyy-MM-dd
   function getFirebaseDateKey(date?: string | Date | null): string {
     if (!date) return ""
-    const d = typeof date === 'string' ? parseISO(date) : date;
-    if (!isValid(d)) return "";
-    return format(d, 'yyyy-MM-dd');
+    const d = typeof date === "string" ? parseISO(date) : date
+    if (!isValid(d)) return ""
+    return format(d, "yyyy-MM-dd")
   }
 
   // Combine IPD info and billing info into a single record
@@ -140,7 +146,7 @@ export default function OptimizedPatientsPage() {
         patientId,
         ipdId,
         name: ipdData.name || "Unknown",
-        uhid: ipdData.uhid || "", // Ensure UHID is included
+        uhid: ipdData.uhid || "",
         mobileNumber: ipdData.phone || "",
         address: ipdData.address || "",
         age: ipdData.age || "",
@@ -148,28 +154,28 @@ export default function OptimizedPatientsPage() {
         relativeName: ipdData.relativeName || "",
         relativePhone: ipdData.relativePhone || "",
         relativeAddress: ipdData.relativeAddress || "",
-        dischargeDate: ipdData.dischargeDate || "", // This is the actual discharge date
-        admissionDate: ipdData.admitDate || "", // This is the admission date
+        dischargeDate: ipdData.dischargeDate || "",
+        admissionDate: ipdData.admitDate || "",
         amount: billingData?.totalDeposit ? Number(billingData.totalDeposit) : 0,
-        roomType: ipdData.ward || "", // Use 'ward' from ipdData
+        roomType: ipdData.ward || "",
         bed: ipdData.bed || "",
         services: servicesArray,
         payments: paymentsArray,
         discount: ipdData.discount ? Number(ipdData.discount) : 0,
         createdAt: ipdData.createdAt || "",
-        billNumber: billingData?.billNumber || ipdData?.billNumber || "", // <-- Prefer billingData, fallback to ipdData
+        billNumber: billingData?.billNumber || ipdData?.billNumber || "",
       }
     },
     [],
   )
 
-  // Active (non-discharge) patients: only fetch from /patients/ipdactive
-  // This listener is always active for the active tab
+  // Active (non-discharge) patients listener
   useEffect(() => {
-    // Clear any previous listeners for active records if state changes
     const ipdActiveRef = ref(db, "patients/ipdactive")
-    setActiveIpdRecords([]); // Clear previous records
-    setIsLoading(true);
+    setActiveIpdRecords([])
+    if (!selectedAdmissionDate && selectedTab === "non-discharge") {
+      setIsLoading(true)
+    }
 
     const handleAdd = onChildAdded(ipdActiveRef, (snapshot) => {
       const data = snapshot.val()
@@ -188,13 +194,15 @@ export default function OptimizedPatientsPage() {
             bed: data.bed || "",
             amount: data.advanceDeposit || 0,
             admissionDate: data.admitDate || "",
-            dischargeDate: "", // Active patients don't have a discharge date yet
+            dischargeDate: "",
             services: [],
             payments: [],
           },
         ]
       })
-      setIsLoading(false)
+      if (!selectedAdmissionDate && selectedTab === "non-discharge") {
+        setIsLoading(false)
+      }
     })
     const handleChange = onChildChanged(ipdActiveRef, (snapshot) => {
       const data = snapshot.val()
@@ -224,212 +232,153 @@ export default function OptimizedPatientsPage() {
       handleAdd()
       handleChange()
       handleRemove()
-      // Do not clear activeIpdRecords here, as it's needed for overall filtering later.
     }
-  }, []) // No dependencies means it runs once on mount and sets up listeners
+  }, [selectedAdmissionDate, selectedTab])
 
-  // Load Discharged Patients based on selected date filters or default to this week
-  const loadDischargedPatients = useCallback(async () => {
+  // Load IPD Details by ADMISSION DATE
+  const loadIpdDetailsByAdmissionDate = useCallback(async () => {
     setIsLoading(true)
-    setDischargedRecords([]) // Clear previous discharged records
-    setDischargedDataSize(0)
+    setDetailedRecords([])
+    setDetailedDataSize(0)
 
-    let queryDateStart: Date;
-    let queryDateEnd: Date;
-    let filterByDischargeDate = false; // Flag to indicate if we're filtering by dischargeDate
-
-    if (selectedAdmissionDate) {
-        // If admission date is selected, query that specific admission date
-        queryDateStart = selectedAdmissionDate;
-        queryDateEnd = selectedAdmissionDate;
-        filterByDischargeDate = false; // We're querying by admission date, not discharge date
-    } else if (selectedDischargeDate) {
-        // If specific discharge date is selected, query a broad range of admission dates
-        // to find patients discharged on this date.
-        // A full year range for admission dates.
-        queryDateStart = new Date(selectedDischargeDate.getFullYear(), 0, 1);
-        queryDateEnd = new Date(selectedDischargeDate.getFullYear(), 11, 31);
-        filterByDischargeDate = true; // We will filter by discharge date after fetching
-    } else { // Default: This week's discharged (filter by dischargeDate)
-        queryDateEnd = new Date(); // Today
-        queryDateStart = startOfWeek(queryDateEnd, { weekStartsOn: 1 }); // Monday of this week
-        filterByDischargeDate = true;
+    if (!selectedAdmissionDate) {
+      setIsLoading(false)
+      return
     }
+
+    let queryDateKey = getFirebaseDateKey(selectedAdmissionDate)
 
     try {
-        const fetchPromises: Promise<any>[] = [];
-        const fetchedRawIpdData: { patientId: string; ipdId: string; ipdData: any; dateKey: string }[] = [];
-        let totalBytesFetched = 0;
+      let totalBytesFetched = 0
+      const fetchedRawIpdData: { patientId: string; ipdId: string; ipdData: any; dateKey: string }[] = []
+      const admittedRef = ref(db, `patients/ipddetail/userinfoipd/${queryDateKey}`)
+      const snap = await get(admittedRef)
+      if (snap.exists()) {
+        const dateData = snap.val()
+        totalBytesFetched += JSON.stringify(dateData).length
+        Object.keys(dateData).forEach((patientId) => {
+          Object.keys(dateData[patientId]).forEach((ipdId) => {
+            fetchedRawIpdData.push({
+              patientId,
+              ipdId,
+              ipdData: dateData[patientId][ipdId],
+              dateKey: queryDateKey,
+            })
+          })
+        })
+      }
 
-        // Iterate through the determined date range for admission dates
-        let currentDate = queryDateStart;
-        while (currentDate <= queryDateEnd) {
-            const admitDateKey = getFirebaseDateKey(currentDate);
-            const admittedRef = ref(db, `patients/ipddetail/userinfoipd/${admitDateKey}`);
-            fetchPromises.push(get(admittedRef).then(snap => {
-                if (snap.exists()) {
-                    const dateData = snap.val();
-                    totalBytesFetched += JSON.stringify(dateData).length;
-                    Object.keys(dateData).forEach(patientId => {
-                        Object.keys(dateData[patientId]).forEach(ipdId => {
-                            fetchedRawIpdData.push({
-                                patientId,
-                                ipdId,
-                                ipdData: dateData[patientId][ipdId],
-                                dateKey: admitDateKey, // Admission date key
-                            });
-                        });
-                    });
-                }
-            }));
-            currentDate = addDays(currentDate, 1);
-        }
+      const billingPromises: Promise<any>[] = []
+      const billingMap = new Map<string, any>()
 
-        await Promise.all(fetchPromises); // Wait for all IPD info to fetch
+      for (const entry of fetchedRawIpdData) {
+        const billingRef = ref(
+          db,
+          `patients/ipddetail/userbillinginfoipd/${entry.dateKey}/${entry.patientId}/${entry.ipdId}`,
+        )
+        billingPromises.push(
+          get(billingRef).then((snap) => {
+            const billingVal = snap.exists() ? snap.val() : {}
+            totalBytesFetched += JSON.stringify(billingVal).length
+            billingMap.set(entry.ipdId, billingVal)
+          }),
+        )
+      }
+      await Promise.all(billingPromises)
 
-        const billingPromises: Promise<any>[] = [];
-        const billingMap = new Map<string, any>(); // Map to store billing data by ipdId for later combination
+      const combinedFetchedRecords: BillingRecord[] = fetchedRawIpdData.map((entry) =>
+        combineRecordData(entry.patientId, entry.ipdId, entry.ipdData, billingMap.get(entry.ipdId) || {}),
+      )
 
-        for (const entry of fetchedRawIpdData) {
-            if (entry.ipdData.dischargeDate) { // Only fetch billing for discharged records
-                const billingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${entry.dateKey}/${entry.patientId}/${entry.ipdId}`);
-                billingPromises.push(get(billingRef).then(snap => {
-                    const billingVal = snap.exists() ? snap.val() : {};
-                    totalBytesFetched += JSON.stringify(billingVal).length;
-                    billingMap.set(entry.ipdId, billingVal);
-                }));
-            }
-        }
-
-        await Promise.all(billingPromises); // Wait for all billing data to fetch
-
-        let tempDischargedRecords: BillingRecord[] = fetchedRawIpdData
-            .filter(entry => entry.ipdData.dischargeDate) // Ensure it's discharged
-            .map(entry => combineRecordData(
-                entry.patientId,
-                entry.ipdId,
-                entry.ipdData,
-                billingMap.get(entry.ipdId) || {}
-            ));
-
-        // Apply discharge date filter if needed
-        if (filterByDischargeDate) {
-            tempDischargedRecords = tempDischargedRecords.filter(record => {
-                const dischargeDate = parseISO(record.dischargeDate || '');
-                if (!isValid(dischargeDate)) return false;
-
-                if (selectedDischargeDate) {
-                    return getFirebaseDateKey(dischargeDate) === getFirebaseDateKey(selectedDischargeDate);
-                } else { // Default: This week's discharge
-                    return dischargeDate >= startOfWeek(new Date(), { weekStartsOn: 1 }) && dischargeDate <= endOfWeek(new Date(), { weekStartsOn: 1 });
-                }
-            });
-        }
-        // If selectedAdmissionDate, it's already implicitly filtered by the initial query range.
-
-        setDischargedRecords(tempDischargedRecords);
-        setDischargedDataSize(totalBytesFetched);
-        setHasLoadedDischarged(true);
+      setDetailedRecords(combinedFetchedRecords)
+      setDetailedDataSize(totalBytesFetched)
+      setHasLoadedDetails(true)
     } catch (err) {
-      setDischargedDataSize(0)
-      setDischargedRecords([])
-      console.error("Error loading discharged patients:", err)
-      toast.error("Failed to load discharged patients.")
+      setDetailedDataSize(0)
+      setDetailedRecords([])
+      console.error("Error loading IPD details:", err)
+      toast.error("Failed to load IPD patient details.")
     } finally {
       setIsLoading(false)
     }
-  }, [combineRecordData, selectedDischargeDate, selectedAdmissionDate]);
+  }, [combineRecordData, selectedAdmissionDate])
 
-  // Effect to trigger loading of discharged patients when tab is selected or date filters change
+  // Effect to trigger loading of IPD details
   useEffect(() => {
-    // Only load discharged if on the discharge tab OR if an admission date is specifically selected.
-    // If an admission date is selected, it will affect *both* active and discharged records,
-    // so we call loadDischargedPatients to get the relevant discharged ones.
-    if (selectedTab === "discharge" || selectedAdmissionDate) {
-      loadDischargedPatients();
-    } else if (selectedTab === "non-discharge" && !selectedAdmissionDate) {
-        // If on non-discharge tab and no admission date filter, ensure discharged records are cleared
-        // or set to their default "this week" view by calling loadDischargedPatients with null filters.
-        // This avoids stale data if user switches back and forth without re-filtering.
-        if (dischargedRecords.length > 0 || hasLoadedDischarged) { // Only clear if there's data or it was loaded
-            setDischargedRecords([]);
-            setDischargedDataSize(0);
-            setHasLoadedDischarged(false); // Reset to ensure reload if discharge tab is selected later
-        }
+    if (selectedTab === "discharge" && (selectedAdmissionDate || searchTerm)) {
+      loadIpdDetailsByAdmissionDate()
+    } else {
+      if (detailedRecords.length > 0 || hasLoadedDetails) {
+        setDetailedRecords([])
+        setDetailedDataSize(0)
+        setHasLoadedDetails(false)
+      }
     }
-  }, [selectedTab, selectedDischargeDate, selectedAdmissionDate, loadDischargedPatients, dischargedRecords.length, hasLoadedDischarged]);
+  }, [selectedTab, selectedAdmissionDate, searchTerm, loadIpdDetailsByAdmissionDate, detailedRecords.length, hasLoadedDetails])
 
-
-  // Filter records based on tab, search, ward, and date filters
+  // Main filtering logic (client-side)
   useEffect(() => {
-    let records: BillingRecord[] = []
+    let recordsToFilter: BillingRecord[] = []
 
     if (selectedAdmissionDate) {
-        // If an admission date is selected, filter across ALL active and discharged records by that admission date
-        const admitDateKey = getFirebaseDateKey(selectedAdmissionDate);
-        records = [...activeIpdRecords, ...dischargedRecords].filter(
-            (rec: BillingRecord) => getFirebaseDateKey(rec.admissionDate) === admitDateKey
-        );
+      recordsToFilter = [...detailedRecords]
+      const admitDateKey = getFirebaseDateKey(selectedAdmissionDate)
+      const relevantActive = activeIpdRecords.filter((rec) => getFirebaseDateKey(rec.admissionDate) === admitDateKey)
+      // Combine and remove duplicates by ipdId
+      const combined = [...recordsToFilter, ...relevantActive]
+      const uniqueRecords = Array.from(new Map(combined.map(item => [item.ipdId, item])).values())
+      recordsToFilter = uniqueRecords
     } else {
-        // If no admission date is selected, use the tab-specific logic
-        if (selectedTab === "non-discharge") {
-            records = activeIpdRecords;
-        } else { // selectedTab === "discharge"
-            // Discharged records are already filtered by loadDischargedPatients for discharge date or this week
-            records = dischargedRecords;
-        }
+      if (selectedTab === "non-discharge") {
+        recordsToFilter = activeIpdRecords
+      } else {
+        recordsToFilter = detailedRecords.filter((record) => record.dischargeDate)
+      }
     }
 
-    const term = searchTerm.trim().toLowerCase();
+    const term = searchTerm.trim().toLowerCase()
     if (term) {
-      records = records.filter(
+      recordsToFilter = recordsToFilter.filter(
         (rec) =>
           rec.ipdId.toLowerCase().includes(term) ||
           rec.name.toLowerCase().includes(term) ||
           rec.mobileNumber.toLowerCase().includes(term) ||
           (rec.uhid && rec.uhid.toLowerCase().includes(term)),
-      );
+      )
     }
 
     if (selectedWard !== "All") {
-      records = records.filter((rec: BillingRecord) => rec.roomType && rec.roomType.toLowerCase() === selectedWard.toLowerCase()) // Explicitly type 'rec'
+      recordsToFilter = recordsToFilter.filter(
+        (rec: BillingRecord) => rec.roomType && rec.roomType.toLowerCase() === selectedWard.toLowerCase(),
+      )
     }
-    
-    setFilteredRecords(records);
-  }, [selectedTab, searchTerm, selectedWard, activeIpdRecords, dischargedRecords, selectedAdmissionDate]);
 
+    setFilteredRecords(recordsToFilter)
+  }, [selectedTab, searchTerm, selectedWard, activeIpdRecords, detailedRecords, selectedAdmissionDate])
 
   // Event handlers
   const handleRowClick = (record: BillingRecord) => {
     const admitDateKey = getFirebaseDateKey(record.admissionDate || record.createdAt)
     router.push(`/billing/${record.patientId}/${record.ipdId}/${admitDateKey}`)
   }
-
   const handleEditRecord = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
     const admitDateKey = getFirebaseDateKey(record.admissionDate || record.createdAt)
     router.push(`/billing/edit/${record.patientId}/${record.ipdId}/${admitDateKey}`)
   }
-
   const handleManagePatient = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
-    const admitDateKey = getFirebaseDateKey(record.admissionDate || record.createdAt)
     router.push(`/manage/${record.patientId}/${record.ipdId}`)
   }
-
   const handleDrugChart = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
-    const admitDateKey = getFirebaseDateKey(record.admissionDate || record.createdAt)
     router.push(`/drugchart/${record.patientId}/${record.ipdId}`)
   }
-
   const handleOTForm = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
     const admitDateKey = getFirebaseDateKey(record.admissionDate || record.createdAt)
     router.push(`/ot/${record.patientId}/${record.ipdId}/${admitDateKey}`)
   }
-
-  // Handle Cancel Appointment button click
   const handleCancelAppointment = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
     setRecordToCancel(record)
@@ -438,116 +387,133 @@ export default function OptimizedPatientsPage() {
     setShowCancelModal(true)
   }
 
-  // Confirm cancellation after password input
+  // UPDATED to be an atomic operation
   const confirmCancelAppointment = async () => {
-    if (cancelPassword !== "medford@788") {
+    if (cancelPassword !== "medford@788") { // IMPORTANT: Use environment variables for passwords
       setCancelError("Incorrect password.")
       return
     }
-
     if (!recordToCancel) {
       setCancelError("No record selected for cancellation.")
       return
     }
 
-    setIsLoading(true) // Show loading state during deletion
+    setIsLoading(true)
     try {
       const { patientId, ipdId, admissionDate, createdAt } = recordToCancel
       const dateKey = getFirebaseDateKey(admissionDate || createdAt)
 
-      // 1. Delete from /patients/ipdactive/{ipdId}
-      await remove(ref(db, `patients/ipdactive/${ipdId}`))
+      // Create a map of all paths to delete
+      const updates: { [key: string]: null } = {}
+      updates[`/patients/ipdactive/${ipdId}`] = null
+      updates[`/patients/ipddetail/userinfoipd/${dateKey}/${patientId}/${ipdId}`] = null
+      updates[`/patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}`] = null
 
-      // 2. Delete from /patients/ipddetail/userinfoipd/{dateKey}/{patientId}/{ipdId}
-      await remove(ref(db, `patients/ipddetail/userinfoipd/${dateKey}/${patientId}/${ipdId}`))
+      // Perform a single, atomic multi-path update
+      await update(ref(db), updates)
 
-      // 3. Delete from /patients/ipddetail/userbillinginfoipd/{dateKey}/{patientId}/{ipdId}
-      // Check if billing record exists before attempting to delete
-      const billingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}`)
-      const billingSnap = await get(billingRef)
-      if (billingSnap.exists()) {
-        await remove(billingRef)
-      }
-
-      toast.success("IPD Appointment cancelled and records deleted successfully!", {
-        position: "top-right",
-        autoClose: 5000,
-      })
+      toast.success("IPD Appointment cancelled and records deleted successfully!")
       setShowCancelModal(false)
       setRecordToCancel(null)
-      setCancelPassword("")
-      setCancelError("")
     } catch (error) {
       console.error("Error cancelling IPD appointment:", error)
-      toast.error("Failed to cancel IPD appointment.", {
-        position: "top-right",
-        autoClose: 5000,
-      })
+      toast.error("Failed to cancel IPD appointment.")
       setCancelError("An error occurred during cancellation.")
     } finally {
+      setCancelPassword("")
       setIsLoading(false)
     }
   }
 
-  // Get unique ward names from current records
-  const allRecordsForWardFilter = useMemo(() => [...activeIpdRecords, ...dischargedRecords], [activeIpdRecords, dischargedRecords]);
+  const allRecordsForWardFilter = useMemo(() => [...activeIpdRecords, ...detailedRecords], [activeIpdRecords, detailedRecords])
   const uniqueWards = useMemo(
-    () => Array.from(new Set(allRecordsForWardFilter.map((record: BillingRecord) => record.roomType).filter((ward): ward is string => ward !== undefined && ward !== null))), // Explicitly type 'ward' and use type guard
-    [allRecordsForWardFilter]
-);
+    () =>
+      Array.from(
+        new Set(
+          allRecordsForWardFilter
+            .map((record: BillingRecord) => record.roomType)
+            .filter((ward): ward is string => ward !== undefined && ward !== null),
+        ),
+      ),
+    [allRecordsForWardFilter],
+  )
 
-  // Summary stats
   const totalPatients = filteredRecords.length
   const totalDeposits = filteredRecords.reduce((sum, record) => sum + Number(record.amount || 0), 0)
 
-  // Manual reload for discharge
+  // Manual reload for discharge tab
   function reloadDischargeTab() {
-    setHasLoadedDischarged(false) // Force reload
-    setSelectedDischargeDate(null); // Clear discharge date filter
-    setSelectedAdmissionDate(null); // Clear admission date filter
-    loadDischargedPatients();
+    setHasLoadedDetails(false)
+    setSelectedAdmissionDate(null)
+    // The useEffect hook for `selectedTab` and `selectedAdmissionDate` will trigger the reload.
   }
 
-  // Handle date picker changes
-  const handleDischargeDateChange = (date: Date | null) => {
-    setSelectedDischargeDate(date);
-    setSelectedAdmissionDate(null); // Clear admission date filter if discharge date is set
-    setSearchTerm(""); // Clear search term
-  };
-
   const handleAdmissionDateChange = (date: Date | null) => {
-    setSelectedAdmissionDate(date);
-    setSelectedDischargeDate(null); // Clear discharge date filter if admission date is set
-    setSearchTerm(""); // Clear search term
-  };
-
+    setSelectedAdmissionDate(date)
+    setSearchTerm("")
+  }
   const clearDateFilters = () => {
-    setSelectedDischargeDate(null);
-    setSelectedAdmissionDate(null);
-    setSearchTerm(""); // Clear search term
-    setSelectedWard("All"); // Reset ward filter
-    // If on discharge tab, reload to default "this week"
-    if (selectedTab === "discharge") {
-        setHasLoadedDischarged(false);
-        loadDischargedPatients();
-    }
-  };
+    setSelectedAdmissionDate(null)
+    setSearchTerm("")
+    setSelectedWard("All")
+  }
 
+  async function handleArchiveSearch() {
+    setArchiveSearchError("")
+    setArchiveSearchResults([])
+    const input = archiveSearchInput.trim()
+    if (!input) return
+    if (/^\d{10}$/.test(input) || input.length === 10 || input.length >= 3) {
+      setArchiveSearchLoading(true)
+      try {
+        // Fetch all dates under userinfoipd
+        const userinfoRootRef = ref(db, "patients/ipddetail/userinfoipd")
+        const snap = await get(userinfoRootRef)
+        if (!snap.exists()) {
+          setArchiveSearchResults([])
+          setArchiveSearchLoading(false)
+          return
+        }
+        const allData = snap.val()
+        const results: BillingRecord[] = []
+        Object.keys(allData).forEach(dateKey => {
+          const dateData = allData[dateKey]
+          Object.keys(dateData).forEach(patientId => {
+            Object.keys(dateData[patientId]).forEach(ipdId => {
+              const ipdData = dateData[patientId][ipdId]
+              // Match logic
+              if (
+                (input.length === 10 && (ipdData.uhid === input || ipdData.phone === input)) ||
+                (input.length >= 3 && ipdData.name && ipdData.name.toLowerCase().includes(input.toLowerCase()))
+              ) {
+                results.push(combineRecordData(patientId, ipdId, ipdData, {}))
+              }
+            })
+          })
+        })
+        setArchiveSearchResults(results)
+      } catch (err) {
+        setArchiveSearchError("Error searching records. Please try again.")
+      } finally {
+        setArchiveSearchLoading(false)
+      }
+    } else {
+      setArchiveSearchError("Enter a valid 10-digit mobile, 10-char UHID, or name (min 3 chars)")
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      <ToastContainer /> {/* Ensure ToastContainer is rendered */}
+      <ToastContainer />
       <div className="container mx-auto px-4 py-8">
-        {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-800 mb-2">IPD Billing Management</h1>
           <p className="text-slate-500">Manage and track in-patient billing records</p>
         </div>
-        {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-slate-500">Total Patients</CardTitle>
+              <CardTitle className="text-sm font-medium text-slate-500">Total Patients (Filtered)</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex items-center">
@@ -558,7 +524,7 @@ export default function OptimizedPatientsPage() {
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-slate-500">Total Deposits</CardTitle>
+              <CardTitle className="text-sm font-medium text-slate-500">Total Deposits (Filtered)</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex items-center">
@@ -568,35 +534,23 @@ export default function OptimizedPatientsPage() {
             </CardContent>
           </Card>
         </div>
-        {/* Tabs & Filters */}
         <Card className="mb-8">
           <CardContent className="p-6">
             <Tabs
               defaultValue="non-discharge"
               value={selectedTab}
-              onValueChange={(value) => {
-                setSelectedTab(value as "non-discharge" | "discharge");
-                setSelectedDischargeDate(null); // Clear specific date filter when changing tabs
-                setSelectedAdmissionDate(null); // Clear specific date filter when changing tabs
-                setSearchTerm(""); // Clear search term
-              }}
+              onValueChange={(value) => setSelectedTab(value as "non-discharge" | "discharge")}
             >
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
                 <div className="overflow-x-auto">
                   <TabsList className="bg-slate-100 flex gap-2 whitespace-nowrap">
-                    <TabsTrigger
-                      value="non-discharge"
-                      className="data-[state=active]:bg-slate-800 data-[state=active]:text-white"
-                    >
+                    <TabsTrigger value="non-discharge" className="data-[state=active]:bg-slate-800 data-[state=active]:text-white">
                       <XCircle className="h-4 w-4 mr-2" />
-                      Non-Discharged ({activeIpdRecords.length})
+                      Active IPD ({activeIpdRecords.length})
                     </TabsTrigger>
-                    <TabsTrigger
-                      value="discharge"
-                      className="data-[state=active]:bg-slate-800 data-[state=active]:text-white"
-                    >
+                    <TabsTrigger value="discharge" className="data-[state=active]:bg-slate-800 data-[state=active]:text-white">
                       <CheckCircle className="h-4 w-4 mr-2" />
-                      Discharged ({dischargedRecords.length})
+                      Patient Archive ({detailedRecords.filter((rec) => rec.dischargeDate).length})
                     </TabsTrigger>
                   </TabsList>
                 </div>
@@ -612,20 +566,7 @@ export default function OptimizedPatientsPage() {
                 </div>
               </div>
 
-              {/* Date Filters and Clear Button */}
               <div className="flex flex-wrap items-center gap-4 mb-6">
-                <div className="flex items-center gap-2">
-                  <CalendarIcon className="h-4 w-4 text-slate-500" />
-                  <span className="font-medium text-slate-700">Discharge Date:</span>
-                  <DatePicker
-                    selected={selectedDischargeDate}
-                    onChange={handleDischargeDateChange}
-                    dateFormat="dd/MM/yyyy"
-                    placeholderText="Select Discharge Date"
-                    className="border rounded-md px-3 py-1 w-36"
-                    isClearable
-                  />
-                </div>
                 <div className="flex items-center gap-2">
                   <CalendarIcon className="h-4 w-4 text-slate-500" />
                   <span className="font-medium text-slate-700">Admission Date:</span>
@@ -633,39 +574,24 @@ export default function OptimizedPatientsPage() {
                     selected={selectedAdmissionDate}
                     onChange={handleAdmissionDateChange}
                     dateFormat="dd/MM/yyyy"
-                    placeholderText="Select Admission Date"
-                    className="border rounded-md px-3 py-1 w-36"
+                    placeholderText="Load by Admission Date"
+                    className="border rounded-md px-3 py-1 w-40"
                     isClearable
                   />
                 </div>
-                {(selectedDischargeDate || selectedAdmissionDate || searchTerm || selectedWard !== "All") && (
-                    <Button variant="outline" size="sm" onClick={clearDateFilters} className="text-red-500 border-red-200 hover:bg-red-50">
-                        Clear All Filters
-                    </Button>
-                )}
               </div>
 
-              {/* Ward Filter */}
               <div className="mb-6">
                 <div className="flex items-center gap-2 mb-2">
                   <Home className="h-4 w-4 text-slate-500" />
                   <h3 className="font-medium text-slate-700">Filter by Ward</h3>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Badge
-                    variant={selectedWard === "All" ? "default" : "outline"}
-                    className="cursor-pointer"
-                    onClick={() => setSelectedWard("All")}
-                  >
+                  <Badge variant={selectedWard === "All" ? "default" : "outline"} className="cursor-pointer" onClick={() => setSelectedWard("All")}>
                     All Wards
                   </Badge>
-                  {uniqueWards.map((ward: string) => ( // Explicitly type 'ward'
-                    <Badge
-                      key={ward}
-                      variant={selectedWard === ward ? "default" : "outline"}
-                      className="cursor-pointer"
-                      onClick={() => setSelectedWard(ward)} // 'ward' is now guaranteed to be string
-                    >
+                  {uniqueWards.map((ward: string) => (
+                    <Badge key={ward} variant={selectedWard === ward ? "default" : "outline"} className="cursor-pointer" onClick={() => setSelectedWard(ward)}>
                       {ward}
                     </Badge>
                   ))}
@@ -673,42 +599,70 @@ export default function OptimizedPatientsPage() {
               </div>
 
               <TabsContent value="non-discharge" className="mt-0">
-                {renderPatientsTable(
-                  filteredRecords,
-                  handleRowClick,
-                  handleEditRecord,
-                  handleManagePatient,
-                  handleDrugChart,
-                  handleOTForm,
-                  handleCancelAppointment, // Pass the new handler
-                  isLoading,
-                )}
+                {renderPatientsTable(filteredRecords, handleRowClick, handleEditRecord, handleManagePatient, handleDrugChart, handleOTForm, handleCancelAppointment, isLoading)}
               </TabsContent>
               <TabsContent value="discharge" className="mt-0">
-                <div className="mb-3 flex items-center gap-3">
-                  <span className="text-xs text-slate-500">
-                    Data downloaded: <b>{formatBytes(dischargedDataSize)}</b>
-                  </span>
-                  <Button variant="outline" size="sm" onClick={reloadDischargeTab}>
-                    Reload Discharged Data
+                <div className="mb-4 flex items-center gap-2">
+                  <Input
+                    type="text"
+                    value={archiveSearchInput}
+                    onChange={e => setArchiveSearchInput(e.target.value)}
+                    placeholder="Enter 10-digit mobile, 10-char UHID, or patient name (min 3 chars)"
+                    className="w-64"
+                  />
+                  <Button
+                    onClick={handleArchiveSearch}
+                    disabled={archiveSearchLoading || !archiveSearchInput.trim()}
+                    variant="default"
+                  >
+                    {archiveSearchLoading ? (
+                      <div className="mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      "Search"
+                    )}
                   </Button>
                 </div>
-                {renderPatientsTable(
-                  filteredRecords,
-                  handleRowClick,
-                  handleEditRecord,
-                  handleManagePatient,
-                  handleDrugChart,
-                  handleOTForm,
-                  handleCancelAppointment, // Pass the new handler
-                  isLoading,
+                {archiveSearchError && (
+                  <div className="text-red-500 mb-2">{archiveSearchError}</div>
+                )}
+                {archiveSearchResults.length > 0 ? (
+                  renderPatientsTable(archiveSearchResults, handleRowClick, handleEditRecord, handleManagePatient, handleDrugChart, handleOTForm, handleCancelAppointment, isLoading)
+                ) : (
+                  (!selectedAdmissionDate && !archiveSearchInput) ? (
+                    <div className="text-center py-12 bg-slate-50 rounded-lg border border-slate-200">
+                      <Users className="h-12 w-12 text-slate-300 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-slate-700 mb-1">No data loaded</h3>
+                      <p className="text-slate-500">Select an admission date or search by patient details to view archived records.</p>
+                    </div>
+                  ) : (
+                    archiveSearchInput && !archiveSearchLoading && (
+                      <div className="text-center py-12 bg-slate-50 rounded-lg border border-slate-200">
+                        <Users className="h-12 w-12 text-slate-300 mx-auto mb-4" />
+                        <h3 className="text-lg font-medium text-slate-700 mb-1">No patients found</h3>
+                        <p className="text-slate-500">No records match your search criteria.</p>
+                      </div>
+                    )
+                  )
+                )}
+                {selectedAdmissionDate && !archiveSearchInput && (
+                  <>
+                    <div className="mb-3 flex items-center gap-3">
+                      <span className="text-xs text-slate-500">
+                        Data downloaded for selected range: <b>{formatBytes(detailedDataSize)}</b>
+                      </span>
+                      <Button variant="outline" size="sm" onClick={reloadDischargeTab}>
+                        <RefreshCw className="h-3 w-3 mr-2"/>
+                        Reload Recent Admissions
+                      </Button>
+                    </div>
+                    {renderPatientsTable(filteredRecords, handleRowClick, handleEditRecord, handleManagePatient, handleDrugChart, handleOTForm, handleCancelAppointment, isLoading)}
+                  </>
                 )}
               </TabsContent>
             </Tabs>
           </CardContent>
         </Card>
       </div>
-      {/* Cancellation Confirmation Modal */}
       {showCancelModal && recordToCancel && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
@@ -738,7 +692,7 @@ export default function OptimizedPatientsPage() {
                 value={cancelPassword}
                 onChange={(e) => {
                   setCancelPassword(e.target.value)
-                  setCancelError("") // Clear error on input change
+                  setCancelError("")
                 }}
                 placeholder="Enter password"
                 className={cancelError ? "border-red-500" : ""}
@@ -779,7 +733,7 @@ function renderPatientsTable(
   handleManagePatient: (e: React.MouseEvent, record: BillingRecord) => void,
   handleDrugChart: (e: React.MouseEvent, record: BillingRecord) => void,
   handleOTForm: (e: React.MouseEvent, record: BillingRecord) => void,
-  handleCancelAppointment: (e: React.MouseEvent, record: BillingRecord) => void, // New prop
+  handleCancelAppointment: (e: React.MouseEvent, record: BillingRecord) => void,
   isLoading: boolean,
 ) {
   if (isLoading) {
@@ -806,31 +760,26 @@ function renderPatientsTable(
         <thead>
           <tr className="bg-slate-50 border-b border-slate-200">
             <th className="px-4 py-3 text-left font-medium text-slate-500">#</th>
-            <th className="px-4 py-3 text-left font-medium text-slate-500">Patient Name</th>
-            <th className="px-4 py-3 text-left font-medium text-slate-500">Mobile Number</th>
+            <th className="px-4 py-3 text-left font-medium text-slate-500">Patient Details</th>
             <th className="px-4 py-3 text-left font-medium text-slate-500">Deposit (₹)</th>
-            <th className="px-4 py-3 text-left font-medium text-slate-500">Room Type</th>
+            <th className="px-4 py-3 text-left font-medium text-slate-500">Room</th>
             <th className="px-4 py-3 text-left font-medium text-slate-500">Status</th>
             <th className="px-4 py-3 text-right font-medium text-slate-500">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-200">
           {records.map((record, index) => (
-            <tr
-              key={`${record.patientId}-${record.ipdId}`}
-              onClick={() => handleRowClick(record)}
-              className="hover:bg-slate-50 transition-colors cursor-pointer"
-            >
+            <tr key={`${record.patientId}-${record.ipdId}`} onClick={() => handleRowClick(record)} className="hover:bg-slate-50 transition-colors cursor-pointer">
               <td className="px-4 py-3 text-slate-700">{index + 1}</td>
               <td className="px-4 py-3">
                 <div className="font-medium text-slate-800">{record.name}</div>
-                <div className="text-xs text-slate-500">UHID: {record.uhid || record.patientId}</div>
+                <div className="text-xs text-slate-500">UHID: {record.uhid || "N/A"} | IPD: {record.ipdId}</div>
+                <div className="text-xs text-slate-500">📱 {record.mobileNumber}</div>
               </td>
-              <td className="px-4 py-3 text-slate-700">{record.mobileNumber}</td>
               <td className="px-4 py-3 font-medium text-slate-800">₹{record.amount.toLocaleString()}</td>
               <td className="px-4 py-3">
                 <Badge variant="outline" className="bg-slate-50">
-                  {record.roomType || "Not Assigned"}
+                  {record.roomType || "N/A"}
                 </Badge>
               </td>
               <td className="px-4 py-3">
@@ -846,52 +795,26 @@ function renderPatientsTable(
               </td>
               <td className="px-4 py-3 text-right">
                 <div className="flex justify-end gap-1 flex-wrap">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={(e) => handleEditRecord(e, record)}
-                    className="text-slate-700 hover:text-slate-900 hover:bg-slate-100"
-                  >
+                  <Button variant="outline" size="sm" onClick={(e) => handleEditRecord(e, record)} className="text-slate-700 hover:text-slate-900 hover:bg-slate-100">
                     <Edit className="h-4 w-4 mr-1" />
                     Edit
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={(e) => handleManagePatient(e, record)}
-                    className="text-slate-700 hover:text-slate-900 hover:bg-slate-100"
-                  >
+                  <Button variant="outline" size="sm" onClick={(e) => handleManagePatient(e, record)} className="text-slate-700 hover:text-slate-900 hover:bg-slate-100">
                     <FileText className="h-4 w-4 mr-1" />
                     Manage
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={(e) => handleDrugChart(e, record)}
-                    className="text-slate-700 hover:text-slate-900 hover:bg-slate-100"
-                  >
+                  <Button variant="outline" size="sm" onClick={(e) => handleDrugChart(e, record)} className="text-slate-700 hover:text-slate-900 hover:bg-slate-100">
                     <Clipboard className="h-4 w-4 mr-1" />
                     Drug Chart
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={(e) => handleOTForm(e, record)}
-                    className="text-blue-700 hover:text-blue-900 hover:bg-blue-50 border-blue-200"
-                  >
+                  <Button variant="outline" size="sm" onClick={(e) => handleOTForm(e, record)} className="text-blue-700 hover:text-blue-900 hover:bg-blue-50 border-blue-200">
                     <Stethoscope className="h-4 w-4 mr-1" />
                     OT
                   </Button>
-                  {/* New Cancel Button */}
-                  {!record.dischargeDate && ( // Only show for non-discharged patients
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={(e) => handleCancelAppointment(e, record)}
-                      className="bg-red-500 hover:bg-red-600 text-white"
-                    >
+                  {!record.dischargeDate && (
+                    <Button variant="destructive" size="sm" onClick={(e) => handleCancelAppointment(e, record)} className="bg-red-500 hover:bg-red-600 text-white">
                       <Trash2 className="h-4 w-4 mr-1" />
-                      Cancel
+                      Cancel IPD
                     </Button>
                   )}
                 </div>
