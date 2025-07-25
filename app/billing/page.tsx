@@ -246,7 +246,7 @@ export default function OptimizedPatientsPage() {
       return
     }
 
-    let queryDateKey = getFirebaseDateKey(selectedAdmissionDate)
+    const queryDateKey = getFirebaseDateKey(selectedAdmissionDate)
 
     try {
       let totalBytesFetched = 0
