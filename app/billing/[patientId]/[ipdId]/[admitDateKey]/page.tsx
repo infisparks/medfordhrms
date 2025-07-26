@@ -89,6 +89,9 @@ interface DoctorVisitForm {
   customDoctorName?: string
   isCustomDoctor: boolean
 }
+interface NoteForm {
+  note: string
+}
 export interface BillingRecord {
   patientId: string
   uhid: string
@@ -114,6 +117,7 @@ export interface BillingRecord {
   createdAt?: string
   doctor?: string
   billNumber?: string
+  note?: string // NEW: Add note field
 }
 interface ParsedServiceItem {
   id: string
@@ -199,6 +203,12 @@ const doctorVisitSchema = yup
   })
   .required()
 
+const noteSchema = yup
+  .object({
+    note: yup.string().max(500, "Note cannot exceed 500 characters").required("Note is required"),
+  })
+  .required()
+
 export default function BillingPage() {
   const { patientId, ipdId, admitDateKey } = useParams() as {
     patientId: string
@@ -211,11 +221,14 @@ export default function BillingPage() {
   const [isPaymentHistoryOpen, setIsPaymentHistoryOpen] = useState(false)
   const [beds, setBeds] = useState<any>({})
   const [doctors, setDoctors] = useState<IDoctor[]>([])
-  const [activeTab, setActiveTab] = useState<"overview" | "services" | "payments" | "consultants">("overview")
+  const [activeTab, setActiveTab] = useState<"overview" | "services" | "payments" | "consultants" | "note">("overview")
   const [isDiscountModalOpen, setIsDiscountModalOpen] = useState(false)
   const [discountUpdated, setDiscountUpdated] = useState(false)
   const [isBulkServiceModalOpen, setIsBulkServiceModalOpen] = useState(false)
   const [serviceOptions, setServiceOptions] = useState<{ value: string; label: string; amount: number }[]>([])
+
+  // Note functionality
+  const [noteUpdated, setNoteUpdated] = useState(false)
 
   // Forms
   const {
@@ -276,6 +289,18 @@ export default function BillingPage() {
       customDoctorName: "",
       isCustomDoctor: false,
     },
+  })
+
+  const {
+    register: registerNote,
+    handleSubmit: handleSubmitNote,
+    formState: { errors: errorsNote },
+    reset: resetNote,
+    setValue: setValueNote,
+    watch: watchNote,
+  } = useForm<NoteForm>({
+    resolver: yupResolver(noteSchema),
+    defaultValues: { note: "" },
   })
 
   const watchPaymentType = watchPayment("paymentType");
@@ -396,6 +421,7 @@ export default function BillingPage() {
           admitDate: infoData.admissionDate || infoData.createdAt || undefined,
           createdAt: infoData.createdAt || "",
           doctor: infoData.doctor || "",
+          note: infoData.note || "", // NEW: Add note field
         }
 
         if (billingData) {
@@ -429,11 +455,16 @@ export default function BillingPage() {
             payments: paymentsArray,
             discount: billingData.discount ? Number(billingData.discount) : 0,
             billNumber: billingData?.billNumber || infoData?.billNumber || '',
+            note: infoData?.note || "", // NEW: Set note from infoData
           })
           if (billingData.discount) resetDiscount({ discount: Number(billingData.discount) })
+          // Reset note form with current note
+          resetNote({ note: infoData?.note || "" })
         } else {
           toast.info("No billing record found. Showing patient details only.")
-          setSelectedRecord({ ...base, billNumber: infoData?.billNumber || '' })
+          setSelectedRecord({ ...base, billNumber: infoData?.billNumber || '', note: infoData?.note || "" })
+          // Reset note form with current note
+          resetNote({ note: infoData?.note || "" })
         }
         setLoading(false)
       }
@@ -806,50 +837,67 @@ export default function BillingPage() {
 
   const onSubmitDoctorVisit: SubmitHandler<DoctorVisitForm> = async (data) => {
     if (!selectedRecord) return
-    setLoading(true)
-    const key = getAdmitDateKey(selectedRecord.admitDate)
-    if (!key) {
-      toast.error("Admission date not found.")
-      setLoading(false)
-      return
-    }
-    try {
-      const doctorName = data.isCustomDoctor
-        ? data.customDoctorName || "Custom Doctor"
-        : doctors.find((d) => d.id === data.doctorId)?.name || "Unknown"
 
-      const old = [...selectedRecord.services]
-      const newItems: ServiceItem[] = []
-      for (let i = 0; i < data.visitTimes; i++) {
-        newItems.push({
-          serviceName: `Consultant Charge: Dr. ${doctorName}`,
-          doctorName,
-          type: "doctorvisit",
-          amount: Number(data.visitCharge),
-          createdAt: new Date().toLocaleString(),
-        })
+    try {
+      setLoading(true)
+      const doctorName = data.isCustomDoctor ? data.customDoctorName! : doctors.find(d => d.id === data.doctorId)?.name || "Unknown Doctor"
+      
+      const newService: ServiceItem = {
+        serviceName: `Consultant Visit - ${doctorName}`,
+        doctorName: doctorName,
+        type: "doctorvisit",
+        amount: data.visitCharge * data.visitTimes,
+        createdAt: new Date().toISOString(),
       }
 
-      const updated = [...newItems, ...old].map((svc) => ({
-        serviceName: svc.serviceName,
-        doctorName: svc.doctorName,
-        type: svc.type,
-        amount: svc.amount,
-        createdAt: svc.createdAt,
-      }))
+      const updatedServices = [...selectedRecord.services, newService]
+      const totalAmount = updatedServices.reduce((sum, service) => sum + service.amount, 0)
 
-      await update(
-        ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}`),
-        { services: updated },
-      )
-      toast.success(
-        `Consultant charge${data.visitTimes > 1 ? "s" : ""} added successfully! (${data.visitTimes} visit${data.visitTimes > 1 ? "s" : ""})`,
-      )
-      setSelectedRecord({ ...selectedRecord, services: updated })
-      resetVisit({ doctorId: "", visitCharge: 0, visitTimes: 1, customDoctorName: "", isCustomDoctor: false })
+      await update(ref(db, `patients/ipddetail/userbillinginfoipd/${admitDateKey}/${patientId}/${ipdId}`), {
+        services: updatedServices,
+        totalDeposit: selectedRecord.amount,
+      })
+
+      setSelectedRecord({
+        ...selectedRecord,
+        services: updatedServices,
+        amount: totalAmount,
+      })
+
+      toast.success("Consultant visit added successfully!")
+      resetVisit()
     } catch (error) {
-      console.error("Error adding consultant charge:", error)
-      toast.error("Failed to add consultant charge. Please try again.")
+      console.error("Error adding consultant visit:", error)
+      toast.error("Failed to add consultant visit.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const onSubmitNote: SubmitHandler<NoteForm> = async (data) => {
+    if (!selectedRecord) return
+
+    try {
+      setLoading(true)
+      setNoteUpdated(false)
+      
+      await update(ref(db, `patients/ipddetail/userinfoipd/${admitDateKey}/${patientId}/${ipdId}`), {
+        note: data.note.trim(),
+      })
+
+      setSelectedRecord({
+        ...selectedRecord,
+        note: data.note.trim(),
+      })
+
+      setNoteUpdated(true)
+      toast.success("Note saved successfully!")
+      
+      // Reset the updated state after 2 seconds
+      setTimeout(() => setNoteUpdated(false), 2000)
+    } catch (error) {
+      console.error("Error saving note:", error)
+      toast.error("Failed to save note.")
     } finally {
       setLoading(false)
     }
@@ -1335,6 +1383,16 @@ export default function BillingPage() {
                       }`}
                     >
                       <UserPlus size={16} className="mr-2" /> Consultants
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("note")}
+                      className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
+                        activeTab === "note"
+                          ? "border-teal-500 text-teal-600"
+                          : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                      }`}
+                    >
+                      <FileText size={16} className="mr-2" /> Note
                     </button>
                   </nav>
                 </div>
@@ -2046,8 +2104,8 @@ export default function BillingPage() {
                                   render={({ field }) => (
                                     <Select
                                       {...field}
-                                      options={doctorOptions}
                                       isClearable
+                                      options={doctorOptions}
                                       placeholder="Search or select a doctor..."
                                       onChange={(opt) => field.onChange(opt ? opt.value : "")}
                                       value={doctorOptions.find((o) => o.value === field.value) || null}
@@ -2143,6 +2201,53 @@ export default function BillingPage() {
                           </form>
                         </div>
                       </div>
+                    </div>
+                  </div>
+                )}
+                {/* Note Tab */}
+                {activeTab === "note" && (
+                  <div className="p-6">
+                    <div className="max-w-xl mx-auto">
+                      <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                        <FileText size={20} className="mr-2 text-teal-600" /> Patient Notes
+                      </h3>
+                      <form onSubmit={handleSubmitNote(onSubmitNote)} className="space-y-3">
+                        <div>
+                          <textarea
+                            {...registerNote("note")}
+                            placeholder="Add any notes about the patient..."
+                            className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none ${
+                              errorsNote.note ? "border-red-500" : "border-gray-300"
+                            } transition duration-200`}
+                            rows={6}
+                            maxLength={500}
+                          />
+                          {errorsNote.note && (
+                            <p className="text-red-500 text-xs mt-1">{errorsNote.note.message}</p>
+                          )}
+                          <div className="flex justify-between items-center mt-2">
+                            <span className="text-xs text-gray-500">
+                              {watchNote("note")?.length || 0}/500 characters
+                            </span>
+                            <button
+                              type="submit"
+                              disabled={loading}
+                              className={`px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors flex items-center ${
+                                loading ? "opacity-50 cursor-not-allowed" : ""
+                              }`}
+                            >
+                              {loading ? (
+                                <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                              ) : noteUpdated ? (
+                                <CheckCircle className="h-4 w-4 mr-2" />
+                              ) : (
+                                <Save className="h-4 w-4 mr-2" />
+                              )}
+                              {loading ? "Saving..." : noteUpdated ? "Saved!" : "Save Note"}
+                            </button>
+                          </div>
+                        </div>
+                      </form>
                     </div>
                   </div>
                 )}

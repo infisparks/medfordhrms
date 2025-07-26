@@ -114,6 +114,7 @@ interface IPDAppointment {
   remainingAmount?: number // This will be (totalAmount - discount) - totalDeposit
   type: "IPD"
   details?: any // For full IPD details if needed
+  note?: string // NEW: Add note field
 }
 
 interface OTAppointment {
@@ -126,7 +127,7 @@ interface OTAppointment {
   time: string
   message: string
   createdAt: string
-  ipdId: string
+  ipdId: string // This refers to the unique OT entry ID, not necessarily an IPD ID. Renamed for clarity.
   type: "OT"
 }
 
@@ -444,6 +445,7 @@ const DashboardPage: React.FC = () => {
                     remainingAmount: remaining,
                     createdAt: rec.createdAt,
                     type: "IPD",
+                    note: rec.note || "", // NEW: Include note from IPD data
                   })
                 }
               }
@@ -452,23 +454,23 @@ const DashboardPage: React.FC = () => {
             // Process OT
             if (otSnap.exists()) {
               const otData = otSnap.val()
-              for (const patientId in otData) {
-                // patientId is UHID or unique ID
-                for (const ipdId in otData[patientId]) {
-                  // this 'ipdId' is the unique OT ID, not IPD's ID
-                  const od = otData[patientId][ipdId]
+              for (const patientIdInPath in otData) {
+                // patientIdInPath is UHID or unique ID
+                for (const otUniqueId in otData[patientIdInPath]) {
+                  // this 'otUniqueId' is the unique OT ID, not IPD's ID
+                  const od = otData[patientIdInPath][otUniqueId]
                   // Use name and phone directly from the OT record
                   tempOt.push({
-                    id: `${patientId}_${ipdId}_${od.createdAt}`, // Ensure unique ID for OT
-                    patientId: patientId, // The ID from the path
-                    uhid: od.uhid || patientId, // Prefer explicit UHID if present, else path ID
-                    name: od.name || "Unknown", // Always use provided name
-                    phone: od.phone || "N/A", // Always use provided phone
+                    id: `${patientIdInPath}_${otUniqueId}_${od.createdAt}`, // Ensure unique ID for OT
+                    patientId: patientIdInPath, // The ID from the path
+                    uhid: od.uhid || patientIdInPath, // Prefer explicit UHID if present, else path ID
+                    name: od.name || "Unknown", // Always use provided name from OT record
+                    phone: od.phone || "N/A", // Always use provided phone from OT record
                     date: od.date || dateStr,
                     time: od.time || "",
                     message: od.message || "",
                     createdAt: od.createdAt,
-                    ipdId: ipdId, // The unique ID for this OT entry
+                    ipdId: otUniqueId, // The unique ID for this OT entry
                     type: "OT",
                   })
                 }
@@ -541,9 +543,8 @@ const DashboardPage: React.FC = () => {
     if (filters.searchQuery) {
       return [] // In search mode, this memo is not used for display
     }
-    const all: CombinedAppointment[] = [...opdAppointments, ...ipdAppointments, ...otAppointments]
-    const list = all
-
+    // No need to filter out OT appointments, as only OPD and IPD are present in these arrays
+    const list: CombinedAppointment[] = [...opdAppointments, ...ipdAppointments];
     // Sorting by date (most recent first)
     list.sort((a, b) => {
       const dateA = new Date(a.type === "IPD" ? (a as IPDAppointment).admissionDate : a.date)
@@ -552,7 +553,7 @@ const DashboardPage: React.FC = () => {
     })
 
     return list
-  }, [opdAppointments, ipdAppointments, otAppointments, filters.searchQuery])
+  }, [opdAppointments, ipdAppointments, filters.searchQuery]); // Removed otAppointments from deps as they are explicitly filtered out
 
   // Doctor consultations
   const doctorConsultations = useMemo(() => {
@@ -814,6 +815,7 @@ const DashboardPage: React.FC = () => {
                   remainingAmount: remaining,
                   createdAt: rec.createdAt,
                   type: "IPD",
+                  note: rec.note || "", // NEW: Include note from IPD data
                 })
               }
             }
@@ -828,8 +830,8 @@ const DashboardPage: React.FC = () => {
                   id: `${patientId}_${otUniqueId}_${od.createdAt}`,
                   patientId: patientId,
                   uhid: od.uhid || patientId,
-                  name: od.name || selectedPatientForAppointments?.name || "Unknown",
-                  phone: od.phone || selectedPatientForAppointments?.phone || "N/A",
+                  name: od.name || selectedPatientForAppointments?.name || "Unknown", // Use name from OT record
+                  phone: od.phone || selectedPatientForAppointments?.phone || "N/A", // Use phone from OT record
                   date: od.date || dateStr,
                   time: od.time || "",
                   message: od.message || "",
@@ -956,7 +958,7 @@ const DashboardPage: React.FC = () => {
                   <Activity className="text-white h-6 w-6" />
                 </div>
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-sky-600 to-blue-600 bg-clip-text text-transparent">
-                  MEDFORD HOSPITAL
+                  G-MEDFORD-NX HOSPITAL
                 </h1>
               </div>
               <div className="relative w-full md:w-1/3">
@@ -1420,8 +1422,15 @@ const DashboardPage: React.FC = () => {
                                 </div>
                                 <div>
                                   <div className="text-sm font-medium text-gray-900">{app.name}</div>
-                                  {(app.type === "IPD" || app.type === "OT") && (
+                                  {/* Only display UHID for IPD as OT is now excluded from this list */}
+                                  {app.type === "IPD" && (
                                     <div className="text-xs text-gray-500">UHID: {app.uhid}</div>
+                                  )}
+                                  {app.type === "IPD" && (app as IPDAppointment).note && (
+                                    <div className="text-xs text-blue-600 flex items-center mt-1">
+                                      <FileText className="h-3 w-3 mr-1" />
+                                      Has Note
+                                    </div>
                                   )}
                                 </div>
                               </div>
@@ -1433,7 +1442,7 @@ const DashboardPage: React.FC = () => {
                               <div className="text-sm text-gray-900">
                                 {format(
                                   new Date(
-                                    app.type === "OPD" || app.type === "OT"
+                                    app.type === "OPD"
                                       ? app.date
                                       : (app as IPDAppointment).admissionDate,
                                   ),
@@ -1442,7 +1451,7 @@ const DashboardPage: React.FC = () => {
                               </div>
                               <div className="text-xs text-gray-500 flex items-center">
                                 <Clock className="h-3 w-3 mr-1" />
-                                {app.type === "OPD" || app.type === "OT"
+                                {app.type === "OPD"
                                   ? app.time
                                   : (app as IPDAppointment).admissionTime}
                               </div>
@@ -1475,7 +1484,6 @@ const DashboardPage: React.FC = () => {
                                   )}
                                 </div>
                               )}
-                              {app.type === "OT" && <div className="text-sm text-gray-500">Procedure</div>}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm">
                               <button
@@ -1589,7 +1597,7 @@ const DashboardPage: React.FC = () => {
                           )}
                           {selectedAppointment.type === "OT" && (
                             <div>
-                              <p className="text-sm text-gray-500">IPD ID (for OT)</p>
+                              <p className="text-sm text-gray-500">OT ID</p>
                               <p className="font-medium">{(selectedAppointment as OTAppointment).ipdId}</p>
                             </div>
                           )}
@@ -1819,22 +1827,20 @@ const DashboardPage: React.FC = () => {
                               ))}
                             </div>
                             <div className="mt-4 p-4 bg-white rounded-lg border border-green-200">
-                              <div className="space-y-2">
+                              <div className="flex justify-between items-center">
+                                <span className="text-green-700">Total Paid:</span>
+                                <span className="font-bold text-green-600">
+                                  {formatCurrency((selectedAppointment as IPDAppointment).totalDeposit)}
+                                </span>
+                              </div>
+                              {(selectedAppointment as IPDAppointment).remainingAmount! > 0 && (
                                 <div className="flex justify-between items-center">
-                                  <span className="text-green-700">Total Paid:</span>
-                                  <span className="font-bold text-green-600">
-                                    {formatCurrency((selectedAppointment as IPDAppointment).totalDeposit)}
+                                  <span className="text-red-700">Remaining:</span>
+                                  <span className="font-bold text-red-600">
+                                    {formatCurrency((selectedAppointment as IPDAppointment).remainingAmount!)}
                                   </span>
                                 </div>
-                                {(selectedAppointment as IPDAppointment).remainingAmount! > 0 && (
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-red-700">Remaining:</span>
-                                    <span className="font-bold text-red-600">
-                                      {formatCurrency((selectedAppointment as IPDAppointment).remainingAmount!)}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
+                              )}
                             </div>
                           </div>
                         )}
@@ -1893,6 +1899,18 @@ const DashboardPage: React.FC = () => {
                             </div>
                           </div>
                         </div>
+
+                        {/* Patient Notes */}
+                        {(selectedAppointment as IPDAppointment).note && (
+                          <div className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg p-6">
+                            <h3 className="text-lg font-semibold text-orange-800 mb-4 flex items-center">
+                              <FileText className="mr-2 h-5 w-5" /> Patient Notes
+                            </h3>
+                            <div className="bg-white rounded-lg p-4 border border-orange-200">
+                              <p className="text-gray-800 whitespace-pre-wrap">{(selectedAppointment as IPDAppointment).note}</p>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
