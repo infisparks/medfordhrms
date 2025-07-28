@@ -46,6 +46,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import * as XLSX from "xlsx"
 
 // Register Chart.js components
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend)
@@ -68,6 +69,7 @@ interface IPayment {
   paymentMethod: string
   totalCharges: number
   totalPaid: number
+  billNumber?: string // Added for Excel export
 }
 
 interface IOPDEntry {
@@ -87,6 +89,7 @@ interface IOPDEntry {
   study: string
   time: string
   visitType: string
+  billNumber?: string // Added for Excel export
 }
 
 interface PaymentSummary {
@@ -201,6 +204,7 @@ const AdminDashboardPage: React.FC = () => {
                       study: appt.study || "",
                       time: appt.time || "",
                       visitType: appt.visitType || "",
+                      billNumber: appt.billNumber || "", // Add billNumber
                     });
                   }
                 });
@@ -366,6 +370,30 @@ const AdminDashboardPage: React.FC = () => {
     fetchOPDAppointments(dateFilter)
   }
 
+  const exportOPDExcel = () => {
+    const rows: any[] = []
+    opdAppointments.forEach((appt) => {
+      // Get doctor name from first modality if present
+      const doctorName = appt.modalities && appt.modalities.length > 0 ? appt.modalities[0].doctor || "" : ""
+      rows.push({
+        "Patient Name": appt.name,
+        "Phone": appt.phone,
+        "Bill Number": appt.billNumber || appt.payment?.billNumber || "",
+        "Amount": appt.payment?.totalPaid || 0,
+        "Doctor Name": doctorName,
+        "Payment Method": appt.payment?.paymentMethod || "",
+        "Date": appt.date ? format(new Date(appt.date), "yyyy-MM-dd") : "",
+        "Discount": appt.payment?.discount || 0,
+        "Entered By": appt.enteredBy || "",
+      })
+    })
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "OPD Appointments")
+    XLSX.writeFile(wb, `OPD_Appointments_${format(new Date(), "yyyyMMdd_HHmmss")}.xlsx`)
+    toast.success("Excel downloaded successfully")
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
@@ -406,6 +434,12 @@ const AdminDashboardPage: React.FC = () => {
                 <Button onClick={handleRefresh} disabled={refreshing} variant="outline">
                   <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
                   Refresh
+                </Button>
+                <Button onClick={exportOPDExcel} variant="outline" className="mb-4 flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 16v-8m0 8l-3-3m3 3l3-3m-9 5.25A2.25 2.25 0 015.25 19.5h13.5A2.25 2.25 0 0021 17.25v-10.5A2.25 2.25 0 0018.75 4.5H5.25A2.25 2.25 0 003 6.75v10.5z" />
+                  </svg>
+                  Export Excel
                 </Button>
               </div>
             </div>

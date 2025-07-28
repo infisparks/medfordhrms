@@ -29,6 +29,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import * as XLSX from "xlsx"
 
 // Register Chart.js components
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, ArcElement, Title, Tooltip, Legend)
@@ -55,6 +56,7 @@ interface IPDPatient {
   id: string
   uhid: string
   ipdId: string
+  billNumber?: string // Add billNumber from billingData
   name: string
   phone: string
   age: string | number
@@ -268,6 +270,7 @@ const IPDDashboardPage: React.FC = () => {
                 id: `${patientIdKey}_${ipdId}`,
                 uhid: ipdData.uhid ?? patientIdKey,
                 ipdId,
+                billNumber: billingData?.billNumber || "", // <-- get billNumber from billingData
                 name: ipdData.name || "Unknown",
                 phone: ipdData.phone || "",
                 age: ipdData.age || "",
@@ -440,6 +443,36 @@ const IPDDashboardPage: React.FC = () => {
       default:
         return "IPD Patients"
     }
+  }
+
+  const exportIPDExcel = () => {
+    // Flatten data: one row per patient (or per service if needed), with payment info
+    const rows: any[] = []
+    filteredPatients.forEach((patient) => {
+      rows.push({
+        "Patient Name": patient.name,
+        "Phone": patient.phone,
+        "Address": patient.address || "",
+        "UHID": patient.uhid,
+        "Bill Number": patient.billNumber || patient.ipdId,
+        "Age": patient.age || "",
+        "Gender": patient.gender || "",
+        "Bed Name": patient.roomType || "",
+        "Room Number": patient.roomNumber || "",
+        "Admission Date": patient.admissionDate ? format(new Date(patient.admissionDate), "yyyy-MM-dd") : "",
+        "Discharge Date": patient.dischargeDate ? format(new Date(patient.dischargeDate), "yyyy-MM-dd") : "",
+        "Discount": patient.discount || 0,
+        "Doctor Name": getDoctorName(patient.doctorId),
+        "Status": patient.status,
+        "Total Paid": patient.totalDeposit,
+        "Payment Details": patient.payments.map((p) => `${p.type} (${p.paymentType}): ₹${p.amount}`).join("; "),
+      })
+    })
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "IPD Patients")
+    XLSX.writeFile(wb, `IPD_Patients_${format(new Date(), "yyyyMMdd_HHmmss")}.xlsx`)
+    toast.success("Excel downloaded successfully")
   }
 
   if (loading && !refreshing) {
@@ -707,6 +740,14 @@ const IPDDashboardPage: React.FC = () => {
               </Button>
             </div>
           </div>
+
+          {/* Export Excel Button */}
+          <Button onClick={exportIPDExcel} variant="outline" className="mb-4 flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 16v-8m0 8l-3-3m3 3l3-3m-9 5.25A2.25 2.25 0 015.25 19.5h13.5A2.25 2.25 0 0021 17.25v-10.5A2.25 2.25 0 0018.75 4.5H5.25A2.25 2.25 0 003 6.75v10.5z" />
+            </svg>
+            Export Excel
+          </Button>
 
           {/* IPD Patients Table */}
           <Card>
