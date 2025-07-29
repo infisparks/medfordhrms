@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { db } from "@/lib/firebase"
 import { ref, get } from "firebase/database"
-import { format, subDays, startOfDay, endOfDay, isSameDay, addDays, parseISO } from "date-fns"
+import { format, subDays, startOfDay, endOfDay, isSameDay, addDays, parseISO, startOfMonth, endOfMonth } from "date-fns"
 import { Line, Doughnut } from "react-chartjs-2"
 import {
   Chart as ChartJS,
@@ -21,7 +21,7 @@ import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
 import ProtectedRoute from "@/components/ProtectedRoute"
 import { Search, DollarSign, Bed, RefreshCw, Filter, FileText, Banknote, Tag } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -47,7 +47,7 @@ interface IPDPayment {
   id: string
   amount: number
   paymentType: "cash" | "online"
-  type: "deposit" | "advance" | "refund" // Added 'refund' type
+  type: "deposit" | "advance" | "refund"
   date: string
   createdAt: string
 }
@@ -56,7 +56,7 @@ interface IPDPatient {
   id: string
   uhid: string
   ipdId: string
-  billNumber?: string // Add billNumber from billingData
+  billNumber?: string
   name: string
   phone: string
   age: string | number
@@ -73,13 +73,13 @@ interface IPDPatient {
   dischargeTime?: string
   services: IPDService[]
   totalAmount: number
-  totalDeposit: number // This will now be the net deposit (advances - refunds)
-  totalRefunds: number // NEW: Total refunds for this specific IPD record
+  totalDeposit: number
+  totalRefunds: number
   payments: IPDPayment[]
   remainingAmount: number
   createdAt: string
   enteredBy?: string
-  discount?: number // NEW: Added discount field
+  discount?: number
 }
 
 interface Doctor {
@@ -88,12 +88,13 @@ interface Doctor {
   specialty?: string
 }
 
-type DateFilter = "today" | "7days" | "custom"
+type DateFilter = "today" | "7days" | "month" | "custom"
 
 interface FilterOptions {
   dateFilter: DateFilter
   startDate: string
   endDate: string
+  selectedMonth: string
   status: "all" | "active" | "discharged"
   searchQuery: string
 }
@@ -121,42 +122,64 @@ const IPDDashboardPage: React.FC = () => {
     dateFilter: "7days",
     startDate: format(subDays(new Date(), 7), "yyyy-MM-dd"),
     endDate: format(new Date(), "yyyy-MM-dd"),
+    selectedMonth: format(new Date(), "yyyy-MM"),
     status: "all",
     searchQuery: "",
   })
 
   // Get date range based on filter
-  const getDateRange = useCallback(
-    (filter: DateFilter) => {
-      const now = new Date()
-      const today = startOfDay(now)
+  const getDateRange = useCallback(() => {
+    const now = new Date()
+    const today = startOfDay(now)
 
-      switch (filter) {
-        case "today":
+    switch (filters.dateFilter) {
+      case "today":
+        return {
+          start: today.toISOString(),
+          end: endOfDay(now).toISOString(),
+        }
+      case "7days":
+        const sevenDaysAgo = startOfDay(subDays(now, 6))
+        return {
+          start: sevenDaysAgo.toISOString(),
+          end: endOfDay(now).toISOString(),
+        }
+      case "month":
+        const selectedMonthDate = parseISO(`${filters.selectedMonth}-01`)
+        return {
+          start: startOfMonth(selectedMonthDate).toISOString(),
+          end: endOfMonth(selectedMonthDate).toISOString(),
+        }
+      case "custom":
+        try {
+          const start = startOfDay(parseISO(filters.startDate))
+          const end = endOfDay(parseISO(filters.endDate))
+          if (start > end) {
+            toast.error("Start date cannot be after end date")
+            return {
+              start: today.toISOString(),
+              end: endOfDay(now).toISOString(),
+            }
+          }
+          return {
+            start: start.toISOString(),
+            end: end.toISOString(),
+          }
+        } catch (error) {
+          console.error("Invalid custom date range:", error)
+          toast.error("Invalid date format. Using default range.")
           return {
             start: today.toISOString(),
             end: endOfDay(now).toISOString(),
           }
-        case "7days":
-          const sevenDaysAgo = startOfDay(subDays(now, 6))
-          return {
-            start: sevenDaysAgo.toISOString(),
-            end: endOfDay(now).toISOString(),
-          }
-        case "custom":
-          return {
-            start: startOfDay(new Date(filters.startDate)).toISOString(),
-            end: endOfDay(new Date(filters.endDate)).toISOString(),
-          }
-        default:
-          return {
-            start: startOfDay(subDays(now, 6)).toISOString(),
-            end: endOfDay(now).toISOString(),
-          }
-      }
-    },
-    [filters.startDate, filters.endDate],
-  )
+        }
+      default:
+        return {
+          start: startOfDay(subDays(now, 6)).toISOString(),
+          end: endOfDay(now).toISOString(),
+        }
+    }
+  }, [filters.dateFilter, filters.startDate, filters.endDate, filters.selectedMonth])
 
   // Fetch doctors
   useEffect(() => {
@@ -194,7 +217,7 @@ const IPDDashboardPage: React.FC = () => {
       console.log("Starting to fetch IPD patients...")
       const allPatients: IPDPatient[] = []
 
-      const { start, end } = getDateRange(filters.dateFilter)
+      const { start, end } = getDateRange()
       const startDate = parseISO(start)
       const endDate = parseISO(end)
 
@@ -233,8 +256,8 @@ const IPDDashboardPage: React.FC = () => {
 
               // Process payments and refunds
               const payments: IPDPayment[] = []
-              let netDeposit = 0 // This will be total advances/deposits minus refunds
-              let totalRefunds = 0 // Track total refunds for this IPD record
+              let netDeposit = 0
+              let totalRefunds = 0
 
               if (billingData?.payments) {
                 Object.entries(billingData.payments).forEach(([paymentId, paymentData]: [string, any]) => {
@@ -242,35 +265,35 @@ const IPDDashboardPage: React.FC = () => {
                     id: paymentId,
                     amount: Number(paymentData.amount) || 0,
                     paymentType: paymentData.paymentType,
-                    type: paymentData.type || "deposit", // Ensure 'type' can be 'refund'
+                    type: paymentData.type || "deposit",
                     date: paymentData.date,
                     createdAt: paymentData.createdAt || paymentData.date,
                   }
                   payments.push(payment)
 
                   if (payment.type === "refund") {
-                    netDeposit -= payment.amount // Subtract refunds from net deposit
-                    totalRefunds += payment.amount // Accumulate total refunds
+                    netDeposit -= payment.amount
+                    totalRefunds += payment.amount
                   } else {
-                    netDeposit += payment.amount // Add deposits/advances
+                    netDeposit += payment.amount
                   }
                 })
               }
 
               // Calculate service amounts
-              const services = billingData?.services || [] // Services are now under billingData
+              const services = billingData?.services || []
               const totalServiceAmount = services.reduce(
                 (sum: number, service: IPDService) => sum + (Number(service.amount) || 0),
                 0,
               )
-              const discountAmount = Number(billingData?.discount) || 0 // Extract discount
+              const discountAmount = Number(billingData?.discount) || 0
 
               // Create IPD patient object
               const ipdPatient: IPDPatient = {
                 id: `${patientIdKey}_${ipdId}`,
                 uhid: ipdData.uhid ?? patientIdKey,
                 ipdId,
-                billNumber: billingData?.billNumber || "", // <-- get billNumber from billingData
+                billNumber: billingData?.billNumber || "",
                 name: ipdData.name || "Unknown",
                 phone: ipdData.phone || "",
                 age: ipdData.age || "",
@@ -287,13 +310,13 @@ const IPDDashboardPage: React.FC = () => {
                 dischargeTime: ipdData.dischargeTime,
                 services,
                 totalAmount: totalServiceAmount,
-                totalDeposit: netDeposit, // Use netDeposit here
-                totalRefunds, // Add totalRefunds
+                totalDeposit: netDeposit,
+                totalRefunds,
                 payments,
-                remainingAmount: totalServiceAmount - netDeposit - discountAmount, // Calculate remaining based on netDeposit and discount
+                remainingAmount: totalServiceAmount - netDeposit - discountAmount,
                 createdAt: ipdData.createdAt || ipdData.admissionDate,
                 enteredBy: ipdData.enteredBy,
-                discount: discountAmount, // Assign discount
+                discount: discountAmount,
               }
 
               allPatients.push(ipdPatient)
@@ -318,7 +341,7 @@ const IPDDashboardPage: React.FC = () => {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [filters.dateFilter, filters.status, getDateRange])
+  }, [filters.dateFilter, filters.status, filters.selectedMonth, filters.startDate, filters.endDate, getDateRange])
 
   // Initial load and filter changes
   useEffect(() => {
@@ -345,10 +368,9 @@ const IPDDashboardPage: React.FC = () => {
     const activePatients = ipdPatients.filter((p) => p.status === "active")
     const dischargedPatients = ipdPatients.filter((p) => p.status === "discharged")
 
-    // Total revenue should consider services minus discounts
     const totalRevenue = ipdPatients.reduce((sum, p) => sum + (p.totalAmount - (p.discount || 0)), 0)
     const pendingAmount = ipdPatients.reduce((sum, p) => sum + Math.max(0, p.remainingAmount), 0)
-    const overallRefunds = ipdPatients.reduce((sum, p) => sum + p.totalRefunds, 0) // Sum of all refunds
+    const overallRefunds = ipdPatients.reduce((sum, p) => sum + p.totalRefunds, 0)
 
     const paymentsByMethod = {
       cash: 0,
@@ -366,7 +388,6 @@ const IPDDashboardPage: React.FC = () => {
             paymentsByMethod.onlineRefunds += payment.amount
           }
         } else {
-          // deposit or advance
           if (payment.paymentType === "cash") {
             paymentsByMethod.cash += payment.amount
           } else if (payment.paymentType === "online") {
@@ -376,7 +397,6 @@ const IPDDashboardPage: React.FC = () => {
       })
     })
 
-    // Daily admissions for the last 7 days
     const last7Days = Array.from({ length: 7 }, (_, i) => subDays(new Date(), 6 - i))
     const dailyAdmissions = last7Days.map(
       (day) => ipdPatients.filter((p) => isSameDay(new Date(p.admissionDate), day)).length,
@@ -391,7 +411,7 @@ const IPDDashboardPage: React.FC = () => {
       dischargedCount: dischargedPatients.length,
       totalRevenue,
       pendingAmount,
-      overallRefunds, // NEW
+      overallRefunds,
       paymentsByMethod,
       last7Days: last7Days.map((day) => format(day, "MMM dd")),
       dailyAdmissions,
@@ -410,6 +430,7 @@ const IPDDashboardPage: React.FC = () => {
       dateFilter: "7days",
       startDate: format(subDays(new Date(), 7), "yyyy-MM-dd"),
       endDate: format(new Date(), "yyyy-MM-dd"),
+      selectedMonth: format(new Date(), "yyyy-MM"),
       status: "all",
       searchQuery: "",
     })
@@ -438,6 +459,8 @@ const IPDDashboardPage: React.FC = () => {
         return "Today's IPD Patients"
       case "7days":
         return "Last 7 Days IPD Patients"
+      case "month":
+        return `${format(parseISO(`${filters.selectedMonth}-01`), "MMMM yyyy")} IPD Patients`
       case "custom":
         return `${format(new Date(filters.startDate), "MMM dd")} - ${format(new Date(filters.endDate), "MMM dd, yyyy")}`
       default:
@@ -445,8 +468,21 @@ const IPDDashboardPage: React.FC = () => {
     }
   }
 
+  // Generate month options (last 12 months)
+  const monthOptions = useMemo(() => {
+    const options = []
+    const today = new Date()
+    for (let i = 0; i < 12; i++) {
+      const date = subDays(startOfMonth(today), i * 30)
+      options.push({
+        value: format(date, "yyyy-MM"),
+        label: format(date, "MMMM yyyy"),
+      })
+    }
+    return options
+  }, [])
+
   const exportIPDExcel = () => {
-    // Flatten data: one row per patient (or per service if needed), with payment info
     const rows: any[] = []
     filteredPatients.forEach((patient) => {
       rows.push({
@@ -511,6 +547,7 @@ const IPDDashboardPage: React.FC = () => {
                   <SelectContent>
                     <SelectItem value="today">Today</SelectItem>
                     <SelectItem value="7days">Last 7 Days</SelectItem>
+                    <SelectItem value="month">Select Month</SelectItem>
                     <SelectItem value="custom">Custom Range</SelectItem>
                   </SelectContent>
                 </Select>
@@ -522,34 +559,60 @@ const IPDDashboardPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Custom Date Range */}
-          {filters.dateFilter === "custom" && (
+          {/* Custom Date Range and Month Filter */}
+          {(filters.dateFilter === "custom" || filters.dateFilter === "month") && (
             <div className="mb-6 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
               <div className="flex flex-col sm:flex-row gap-4 items-end">
-                <div className="w-full sm:w-auto">
-                  <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">
-                    Start Date
-                  </label>
-                  <Input
-                    id="startDate"
-                    type="date"
-                    value={filters.startDate}
-                    onChange={(e) => handleFilterChange({ startDate: e.target.value })}
-                    className="w-full sm:w-40"
-                  />
-                </div>
-                <div className="w-full sm:w-auto">
-                  <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">
-                    End Date
-                  </label>
-                  <Input
-                    id="endDate"
-                    type="date"
-                    value={filters.endDate}
-                    onChange={(e) => handleFilterChange({ endDate: e.target.value })}
-                    className="w-full sm:w-40"
-                  />
-                </div>
+                {filters.dateFilter === "custom" && (
+                  <>
+                    <div className="w-full sm:w-auto">
+                      <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">
+                        Start Date
+                      </label>
+                      <Input
+                        id="startDate"
+                        type="date"
+                        value={filters.startDate}
+                        onChange={(e) => handleFilterChange({ startDate: e.target.value })}
+                        className="w-full sm:w-40"
+                      />
+                    </div>
+                    <div className="w-full sm:w-auto">
+                      <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">
+                        End Date
+                      </label>
+                      <Input
+                        id="endDate"
+                        type="date"
+                        value={filters.endDate}
+                        onChange={(e) => handleFilterChange({ endDate: e.target.value })}
+                        className="w-full sm:w-40"
+                      />
+                    </div>
+                  </>
+                )}
+                {filters.dateFilter === "month" && (
+                  <div className="w-full sm:w-auto">
+                    <label htmlFor="selectedMonth" className="block text-sm font-medium text-gray-700 mb-1">
+                      Select Month
+                    </label>
+                    <Select
+                      value={filters.selectedMonth}
+                      onValueChange={(value) => handleFilterChange({ selectedMonth: value })}
+                    >
+                      <SelectTrigger className="w-full sm:w-40">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {monthOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <Button onClick={handleRefresh} className="w-full sm:w-auto">
                   Apply Filter
                 </Button>
@@ -632,7 +695,6 @@ const IPDDashboardPage: React.FC = () => {
 
           {/* Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            {/* Admissions Chart */}
             <Card>
               <CardHeader>
                 <CardTitle>Daily Admissions (Last 7 Days)</CardTitle>
@@ -669,7 +731,6 @@ const IPDDashboardPage: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Payment Method Chart */}
             <Card>
               <CardHeader>
                 <CardTitle>Payment Method Distribution (Net)</CardTitle>
@@ -743,8 +804,19 @@ const IPDDashboardPage: React.FC = () => {
 
           {/* Export Excel Button */}
           <Button onClick={exportIPDExcel} variant="outline" className="mb-4 flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 16v-8m0 8l-3-3m3 3l3-3m-9 5.25A2.25 2.25 0 015.25 19.5h13.5A2.25 2.25 0 0021 17.25v-10.5A2.25 2.25 0 0018.75 4.5H5.25A2.25 2.25 0 003 6.75v10.5z" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.5}
+              stroke="currentColor"
+              className="w-5 h-5"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 16v-8m0 8l-3-3m3 3l3-3m-9 5.25A2.25 2.25 0 015.25 19.5h13.5A2.25 2.25 0 0021 17.25v-10.5A2.25 2.25 0 0018.75 4.5H5.25A2.25 2.25 0 003 6.75v10.5z"
+              />
             </svg>
             Export Excel
           </Button>
